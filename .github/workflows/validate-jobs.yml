@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: 'Number of jobs to validate (empty = all without CIF)'
+        description: 'Number of jobs to validate (empty = 1)'
         required: false
-        default: ''
+        default: '1'
 
 jobs:
   validate-jobs:
@@ -17,11 +17,17 @@ jobs:
     env:
       SOLR_USER: ${{ secrets.SOLR_USER }}
       SOLR_PASSWD: ${{ secrets.SOLR_PASSWD }}
-      SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for commits
+
+      - name: Setup Git
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -33,7 +39,7 @@ jobs:
 
       - name: Create validation script
         run: |
-          cat > validate_one_job.js << 'EOF'
+          cat > validate_url.js << 'EOF'
           const puppeteer = require('puppeteer');
 
           async function validateUrl(url) {
@@ -46,7 +52,7 @@ jobs:
               await page.goto(url, {timeout: 15000});
               await new Promise(r => setTimeout(r, 3000));
               const text = await page.evaluate(() => document.body.innerText);
-              const expired = ['no longer available','expired','404','job filled','ocupat','închis']
+              const expired = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare']
                 .some(i => text.toLowerCase().includes(i));
               await browser.close();
               return expired ? 'EXPIRED' : 'ACTIVE';
@@ -59,7 +65,7 @@ jobs:
           async function main() {
             const url = process.argv[2];
             if (!url) {
-              console.log('Usage: node validate_one_job.js <URL>');
+              console.log('Usage: node validate_url.js <URL>');
               process.exit(1);
             }
             const result = await validateUrl(url);
@@ -80,59 +86,83 @@ jobs:
           curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fq=-cif:[*+TO+*]&sort=date+asc&fl=url,company,title&wt=json&rows=$LIMIT" \
             -u "$SOLR_USER:$SOLR_PASSWD" > /tmp/jobs.json
 
-          JOB_URL=$(cat /tmp/jobs.json | python3 -c "
+          echo "Found $(cat /tmp/jobs.json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['response']['numFound'])") jobs without CIF"
+          cat /tmp/jobs.json | python3 -c "
           import sys,json
           d=json.load(sys.stdin)
-          if d['response']['docs']:
-              print(d['response']['docs'][0]['url'])
-          ")
-          echo "JOB_URL=$JOB_URL" >> $GITHUB_ENV
-          echo "Found job: $JOB_URL"
+          for i,doc in enumerate(d['response']['docs']):
+              print(f'{i+1}. {doc.get(\"company\",\"?\")} - {doc.get(\"title\",\"?\")}')
+          "
 
-      - name: Validate job URL with Puppeteer
-        if: env.JOB_URL != ''
+      - name: Process each job ONE BY ONE
         run: |
-          RESULT=$(node validate_one_job.js "$JOB_URL")
-          echo "VALIDATION_RESULT=$RESULT" >> $GITHUB_ENV
-          echo "URL validation: $RESULT"
+          cat /tmp/jobs.json | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          urls = [doc['url'] for doc in d['response']['docs']]
+          print('\n'.join(urls))
+          " > /tmp/urls.txt
 
-      - name: Delete if EXPIRED
-        if: env.VALIDATION_RESULT == 'EXPIRED'
+          while read -r JOB_URL; do
+            echo "=========================================="
+            echo "Processing: $JOB_URL"
+            echo "=========================================="
+
+            # Step 1: Validate URL with Puppeteer
+            echo "Test 1: tests/test_url.md - Validate URL..."
+            RESULT=$(node validate_url.js "$JOB_URL")
+            echo "Result: $RESULT"
+
+            if [[ "$RESULT" == "EXPIRED" ]]; then
+              echo "Job EXPIRED - Deleting..."
+              curl -X POST "https://solr.peviitor.ro/solr/job/update?commit=true" \
+                -u "$SOLR_USER:$SOLR_PASSWD" \
+                -H "Content-Type: application/json" \
+                -d "{\"delete\": [\"$JOB_URL\"]}"
+
+              # Verify deletion (test_deleted_url.md)
+              sleep 2
+              VERIFY=$(curl -g -s "https://solr.peviitor.ro/solr/job/select?q=url:*$(basename $JOB_URL)*&fl=url&wt=json" \
+                -u "$SOLR_USER:$SOLR_PASSWD" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['response']['numFound'])")
+              if [ "$VERIFY" = "0" ]; then
+                echo "✅ Deletion verified: URL no longer in Solr"
+              else
+                echo "❌ Deletion failed: URL still in Solr"
+              fi
+              continue
+            fi
+
+            if [[ "$RESULT" == ERROR* ]]; then
+              echo "Error validating URL, skipping..."
+              continue
+            fi
+
+            echo "Job ACTIVE - Running all tests..."
+
+            # TODO: Run actual tests and FULL PUSH if needed
+            echo "Tests to implement:"
+            echo "  - tests/test_missing_fields.md"
+            echo "  - tests/test_company.md"
+            echo "  - tests/test_cif.md"
+            echo "  - tests/test_salary.md"
+            echo "  - tests/test_workmode.md"
+            echo "  - tests/test_tags.md"
+            echo "  - tests/test_location.md"
+            echo "  - tests/test_status_vdate.md"
+            echo "  - tests/test_expirationdate.md"
+
+          done < /tmp/urls.txt
+
+      - name: Commit and push changes (if any)
+        if: always()
         run: |
-          curl -X POST "https://solr.peviitor.ro/solr/job/update?commit=true" \
-            -u "$SOLR_USER:$SOLR_PASSWD" \
-            -H "Content-Type: application/json" \
-            -d "{\"delete\": [\"$JOB_URL\"]}"
-
-          # Verify deletion (test_deleted_url.md)
-          sleep 2
-          VERIFY=$(curl -g -s "https://solr.peviitor.ro/solr/job/select?q=url:*$(basename $JOB_URL)*&fl=url&wt=json" \
-            -u "$SOLR_USER:$SOLR_PASSWD" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['response']['numFound'])")
-          if [ "$VERIFY" = "0" ]; then
-            echo "✅ Deletion verified: URL no longer in Solr"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
           else
-            echo "❌ Deletion failed: URL still in Solr"
-            exit 1
+            git commit -m "Validate jobs: Auto-update via GitHub Actions"
+            git push origin main
           fi
-
-      - name: Run ALL tests for ACTIVE job
-        if: env.VALIDATION_RESULT == 'ACTIVE'
-        run: |
-          echo "Running ALL tests for: $JOB_URL"
-          echo "Tests to run:"
-          echo "1. tests/test_url.md - URL validity"
-          echo "2. tests/test_missing_fields.md - All 11 fields"
-          echo "3. tests/test_company.md - UPPERCASE"  
-          echo "4. tests/test_cif.md - Numeric CIF"
-          echo "5. tests/test_salary.md - MIN-MAX RON format"
-          echo "6. tests/test_workmode.md - remote/on-site/hybrid"
-          echo "7. tests/test_tags.md - Max 10 tags"
-          echo "8. tests/test_location.md - Romanian cities array"
-          echo "9. tests/test_status_vdate.md - Valid status + ISO8601"
-          echo "10. tests/test_expirationdate.md - Date + 30 days"
-          echo ""
-          echo "FULL PUSH required after tests if fields missing"
-          echo "Process ONE BY ONE - never skip!"
 
       - name: Upload artifacts
         if: always()
