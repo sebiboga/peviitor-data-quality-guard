@@ -10,3 +10,9 @@ jobs:
       SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Get 1 job
+        run: |
+          curl -g "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=vdate+asc&fl=*&wt=json&rows=1" \
+            -u "$SOLR_AUTH" -o /tmp/jobs.json
+          cat /tmp/jobs.json
