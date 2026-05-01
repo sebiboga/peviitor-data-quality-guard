@@ -50,9 +50,17 @@ This returns the first page of jobs with their URLs.
 For each job URL:
 1. Open the URL in Chrome using Chrome DevTools (`chrome-devtools_navigate_page`)
 2. Take a snapshot to see the content
-3. Determine if it's a **real job** or **NOT a job**:
-   - **NOT a job** (delete): Employee testimonials, company culture pages, "Meet our team" pages
+3. **CHECK FOR 404 / EXPIRED**:
+   - If HTTP 404 error → **DELETE from Solr immediately**
+   - If page contains: "expired", "no longer available", "anunt expirat", "locul nu mai este disponibil" → **DELETE from Solr immediately**
+4. Determine if it's a **real job** or **NOT a job**:
+   - **NOT a job** (delete): Employee testimonials, company culture pages, "Meet our team" pages, 404 errors, expired jobs
    - **Real job**: Has job title, responsibilities, requirements, apply button/form
+
+**DELETE CONDITIONS:**
+- HTTP 404 error → `curl -g -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" "https://solr.peviitor.ro/solr/job/update?commit=true" -d '{"delete": ["<JOB_URL>"]}'`
+- Page shows "expired", "anunt expirat" → DELETE
+- Not a real job (testimonial, company page) → DELETE
 
 ### Step 3: For Real Jobs - Extract Data
 From the job page, extract:
@@ -110,3 +118,25 @@ curl -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
 
 ## 7. OLX Jobs
 See [OLX.md](./OLX.md) for how to verify and scrape OLX jobs using their official API.
+
+## 8. Testing All Job Fields
+**CRITICAL**: After validating a job, run ALL tests in `tests/` folder:
+
+### Required Tests for Each Job:
+1. **Company** (`tests/test_company.md`): Must be UPPERCASE, verify via web search
+2. **CIF** (`tests/test_cif.md`): Must be numeric, verify on ANAF/listafirme.ro
+3. **Salary** (`tests/test_salary.md`): Format "MIN-MAX RON", must be array
+4. **Workmode** (`tests/test_workmode.md`): Only "remote", "on-site", "hybrid"
+5. **Tags** (`tests/test_tags.md`): Max 10 tags, include experience level
+6. **Location** (`tests/test_location.md`): Array of Romanian city names
+7. **Status/Vdate** (`tests/test_status_vdate.md`): Valid status, ISO8601 format
+8. **Expirationdate** (`tests/test_expirationdate.md`): Scrape date + 30 days
+
+### Test Execution:
+For each test file:
+1. Read the test prompt from `tests/<test_file>.md`
+2. Execute the validation steps
+3. If invalid → update with **FULL PUSH** (not atomic update!)
+4. Verify the field is correctly set in Solr
+
+**Remember**: "Run tests from `tests/` folder for EVERY job field!"

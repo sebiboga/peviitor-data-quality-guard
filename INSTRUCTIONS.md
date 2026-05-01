@@ -69,9 +69,18 @@ curl -s "https://api.peviitor.ro/v1/search/?page=1"
 ### Step 2: Check Each Job URL
 For each job URL from the API:
 1. Open the URL in Chrome using Chrome DevTools
-2. Determine if it's a **real job** or **not a job** (testimonials, company pages, etc.)
-3. If NOT a real job (e.g., employee testimonials, company culture pages) → **DELETE from Solr**
-4. If real job → proceed to extract data
+2. **CHECK FOR 404 / PAGE NOT FOUND**:
+   - If URL returns HTTP 404 (or similar error) → **DELETE from Solr immediately**
+   - If page shows "Job expired", "No longer available", "Anunt expirat" → **DELETE from Solr immediately**
+3. Determine if it's a **real job** or **not a job** (testimonials, company pages, etc.)
+4. If NOT a real job (e.g., employee testimonials, company culture pages) → **DELETE from Solr**
+5. If real job → proceed to extract data
+
+**IMPORTANT DELETE CONDITIONS:**
+- HTTP 404 error
+- Page contains: "expired", "no longer available", "anunt expirat", "locul nu mai este disponibil"
+- Page is a testimonial/company page (not a job description)
+- DELETE command: `curl -g -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" "https://solr.peviitor.ro/solr/job/update?commit=true" -d '{"delete": ["<JOB_URL>"]}'`
 
 ### Step 3: For Real Jobs - Extract & Verify Data
 Scrape the following from the job page:
@@ -140,7 +149,32 @@ curl -g -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json"
 ## OLX Jobs
 See [OLX.md](./OLX.md) for how to verify and scrape OLX jobs using their official API.
 
+## Testing All Job Fields
+**IMPORTANT**: Before finishing validation, run ALL tests in `tests/` folder to verify each field:
+
+### Test Files:
+| Test File | Field(s) Tested | Description |
+|-----------|------------------|-------------|
+| `tests/test_company.md` | `company` | Must be UPPERCASE, verify via ANAF |
+| `tests/test_cif.md` | `cif` | Must be numeric, verify exists |
+| `tests/test_salary.md` | `salary` | Format: "MIN-MAX RON", must be array |
+| `tests/test_workmode.md` | `workmode` | Must be: "remote", "on-site", "hybrid" |
+| `tests/test_tags.md` | `tags` | Max 10 tags, include experience level |
+| `tests/test_location.md` | `location` | Must be array of Romanian cities |
+| `tests/test_status_vdate.md` | `status`, `vdate` | Valid status values, vdate format |
+| `tests/test_expirationdate.md` | `expirationdate` | Date + 30 days, ISO8601 |
+
+### How to Run Tests:
+For each job being validated:
+1. Read the corresponding test file from `tests/`
+2. Follow the prompt inside to validate the field
+3. If field is invalid → update with **FULL PUSH**
+4. Verify the update in Solr
+
+**Mnemonic**: "Always run tests from `tests/` folder for EVERY job field!"
+
 ## Notes
 - Use `curl` with `-u "$SOLR_USER:$SOLR_PASSWD"` for authentication (or GitHub secrets `SOLR_USER`/`SOLR_PASSWD`)
 - The Solr instance uses `text_general` field type for most text fields
 - Both cores have copy fields that aggregate text to `_text_` for full-text search
+- **Company name MUST be UPPERCASE** (e.g., "MEGA IMAGE SRL" not "Mega Image SRL")
