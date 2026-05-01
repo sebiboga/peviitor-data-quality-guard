@@ -192,7 +192,7 @@ jobs:
 
           done < /tmp/urls.txt;
 
-      - name: Commit and push changes (if any)
+      - name: Commit changes (if any)
         if: always()
         shell: bash
         run: |
@@ -201,7 +201,7 @@ jobs:
             echo "No changes to commit"
           else
             git commit -m "Validate jobs: Auto-update via GitHub Actions"
-            git push https://x-access-token:${GITHUB_TOKEN}@github.com/sebiboga/peviitor-data-quality-guard.git main
+            echo "Changes committed locally (push disabled in Actions)"
           fi;
 
       - name: Upload artifacts
