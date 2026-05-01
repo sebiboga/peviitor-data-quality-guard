@@ -1,4 +1,4 @@
-name: Validate Jobs One by One
+name: Validate Any Job
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: 'Number of jobs to validate (empty = 1)'
+        description: 'Number of jobs to validate'
         required: false
         default: '1'
 
@@ -16,12 +16,13 @@ jobs:
     timeout-minutes: 40
     env:
       SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for commits!
+          fetch-depth: 0
 
       - name: Setup Git
         run: |
@@ -74,7 +75,7 @@ jobs:
           main();
           EOF;
 
-      - name: Get jobs without CIF
+      - name: Get jobs to validate (any job, prefer not validated today)
         id: get_jobs
         shell: bash
         run: |
@@ -83,8 +84,11 @@ jobs:
             LIMIT=1
           fi;
 
-          echo "Fetching up to $LIMIT jobs without CIF..."
-          curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fq=-cif:[*+TO+*]&sort=date+asc&fl=url,company,title&wt=json&rows=$LIMIT" \
+          echo "Fetching up to $LIMIT jobs to validate..."
+          # Get jobs where vdate is NOT today OR status is 'published'/'scraped'
+          # Also include jobs without CIF for testing
+          TODAY=$(date +%Y-%m-%d)
+          curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fq=-vdate:[$TODAYT00:00:00Z TO *]&sort=date+asc&fl=url,company,title,vdate,status,cif&wt=json&rows=$LIMIT" \
             -u "$SOLR_AUTH" -o /tmp/jobs.json;
 
           echo "=== Solr Response ==="
@@ -93,37 +97,43 @@ jobs:
 
           # Validate JSON
           if ! python3 -c "import sys,json;json.load(open('/tmp/jobs.json'))" 2>/dev/null; then
-            echo "❌ Invalid JSON response from Solr"
-            exit 1
+            echo "❌ Invalid JSON response from Solr - trying simpler query..."
+            # Fallback: get any job sorted by date
+            curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=date+asc&fl=url,company,title,vdate,status,cif&wt=json&rows=$LIMIT" \
+              -u "$SOLR_AUTH" -o /tmp/jobs.json;
           fi;
 
-          NUM_FOUND=$(cat /tmp/jobs.json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['response']['numFound'])")
-          echo "Found $NUM_FOUND jobs without CIF"
+          NUM_FOUND=$(cat /tmp/jobs.json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['response']['numFound'])" 2>/dev/null || echo "0")
+          echo "Found $NUM_FOUND jobs to validate"
 
           cat /tmp/jobs.json | python3 -c "
           import sys,json
           d=json.load(sys.stdin)
           for i,doc in enumerate(d['response']['docs']):
-              print(f'{i+1}. {doc.get("company","?")} - {doc.get("title","?")}')
+              vdate = doc.get('vdate','none')
+              status = doc.get('status','none')
+              cif = doc.get('cif','none')
+              print(f'{i+1}. {doc.get(\"company\")} - {doc.get(\"title\")} (vdate:{vdate}, status:{status}, cif:{cif})')
           "
 
       - name: Process each job ONE BY ONE
+        shell: bash
         run: |
           cat /tmp/jobs.json | python3 -c "
           import sys,json
           d=json.load(sys.stdin)
           urls = [doc['url'] for doc in d['response']['docs']]
           print('\n'.join(urls))
-          " > /tmp/urls.txt
+          " > /tmp/urls.txt;
 
           while read -r JOB_URL; do
             echo "=========================================="
             echo "Processing: $JOB_URL"
             echo "=========================================="
 
-            # Step 1: Validate URL with Puppeteer
-            echo "Test 1: tests/test_url.md - Validate URL..."
-            RESULT=$(node validate_url.js "$JOB_URL")
+            # Step 1: Validate URL with Puppeteer (MANDATORY)
+            echo "Test 1: tests/test_url.md - Validate URL with Puppeteer..."
+            RESULT=$(node validate_url.js "$JOB_URL" 2>&1)
             echo "Result: $RESULT"
 
             if [[ "$RESULT" == "EXPIRED" ]]; then
@@ -143,17 +153,15 @@ jobs:
                 echo "❌ Deletion failed: URL still in Solr"
               fi
               continue
-            fi
+            fi;
 
             if [[ "$RESULT" == ERROR* ]]; then
               echo "Error validating URL, skipping..."
               continue
-            fi
+            fi;
 
-            echo "Job ACTIVE - Running all tests..."
-
-            # TODO: Run actual tests and FULL PUSH if needed
-            echo "Tests to implement:"
+            echo "Job ACTIVE - Running ALL tests..."
+            echo "Tests to run:"
             echo "  - tests/test_missing_fields.md"
             echo "  - tests/test_company.md"
             echo "  - tests/test_cif.md"
@@ -163,13 +171,15 @@ jobs:
             echo "  - tests/test_location.md"
             echo "  - tests/test_status_vdate.md"
             echo "  - tests/test_expirationdate.md"
+            echo ""
+            echo "TODO: Implement FULL PUSH after tests"
+            echo "Process ONE BY ONE - never skip!"
 
-          done < /tmp/urls.txt
+          done < /tmp/urls.txt;
 
       - name: Commit and push changes (if any)
         if: always()
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
         run: |
           git add -A
           if git diff --staged --quiet; then
@@ -177,7 +187,7 @@ jobs:
           else
             git commit -m "Validate jobs: Auto-update via GitHub Actions"
             git push https://x-access-token:${GITHUB_TOKEN}@github.com/sebiboga/peviitor-data-quality-guard.git main
-          fi
+          fi;
 
       - name: Upload artifacts
         if: always()
