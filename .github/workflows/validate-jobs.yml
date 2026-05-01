@@ -85,11 +85,26 @@ jobs:
           fi;
 
           echo "Fetching up to $LIMIT jobs to validate..."
-          # Get jobs where vdate is NOT today OR status is 'published'/'scraped'
-          # Also include jobs without CIF for testing
+          # Get jobs where vdate is NOT today (ignore time, only check date)
+          # This catches: expired jobs, jobs needing re-validation
           TODAY=$(date +%Y-%m-%d)
-          curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fq=-vdate:[$TODAYT00:00:00Z TO *]&sort=date+asc&fl=url,company,title,vdate,status,cif&wt=json&rows=$LIMIT" \
+          TOMORROW=$(date -d tomorrow +%Y-%m-%d)
+          echo "Looking for jobs NOT validated today ($TODAY)..."
+          # Exclude jobs with vdate >= TODAY (meaning validated today or in future)
+          curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fq=-vdate:[$TODAYT00:00:00Z TO *]&sort=vdate+asc&fl=url,company,title,vdate,status,cif&wt=json&rows=$LIMIT" \
             -u "$SOLR_AUTH" -o /tmp/jobs.json;
+
+          echo "=== Solr Response ==="
+          cat /tmp/jobs.json
+          echo ""
+
+          # Validate JSON
+          if ! python3 -c "import sys,json;json.load(open('/tmp/jobs.json'))" 2>/dev/null; then
+            echo "❌ Invalid JSON - trying simpler query..."
+            # Fallback: get any jobs sorted by date (oldest first)
+            curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=date+asc&fl=url,company,title,vdate,status,cif&wt=json&rows=$LIMIT" \
+              -u "$SOLR_AUTH" -o /tmp/jobs.json;
+          fi;
 
           echo "=== Solr Response ==="
           cat /tmp/jobs.json
