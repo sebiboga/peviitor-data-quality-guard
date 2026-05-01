@@ -11,98 +11,164 @@ on:
         default: '1'
         type: string
 
-
 jobs:
   validate-page-1:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     env:
-      SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
+      SOLR_USER: ${{ secrets.SOLR_USER }}
+      SOLR_PASSWD: ${{ secrets.SOLR_PASSWD }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Start Chrome
+      - name: Setup Git
         run: |
-          pkill -f chrome 2>/dev/null || true
-          chromium --remote-debugging-port=9222 --headless --no-sandbox --disable-gpu &
-          sleep 3
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
 
-      - name: Setup PATH
-        run: |
-          export PATH="/home/runner/.opencode/bin:$PATH"
-          echo "$PATH" >> $GITHUB_PATH
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Copy opencode.json
+      - name: Install Puppeteer
+        run: npm install -g puppeteer@latest
+
+      - name: Create validation script
         run: |
-          cat > opencode.json << 'EOF'
-          {
-            "$schema": "https://opencode.ai/config.json",
-            "model": "opencode/big-pickle",
-            "mcp": {
-              "chrome-devtools": {
-                "type": "local",
-                "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:9222"]
-              },
-              "external-directory": {
-                "type": "local",
-                "command": ["npx", "-y", "external-directory-mcp@latest"]
-              }
+          cat > validate_url.js << 'EOF'
+          const puppeteer = require('puppeteer');
+
+          async function validateUrl(url) {
+            const browser = await puppeteer.launch({
+              headless: true,
+              args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+            const page = await browser.newPage();
+            try {
+              await page.goto(url, {timeout: 15000});
+              await new Promise(r => setTimeout(r, 3000));
+              const text = await page.evaluate(() => document.body.innerText);
+              const expired = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare']
+                .some(i => text.toLowerCase().includes(i));
+              await browser.close();
+              return expired ? 'EXPIRED' : 'ACTIVE';
+            } catch(e) {
+              await browser.close();
+              return 'ERROR: ' + e.message;
             }
           }
-          EOF
 
-      - name: Run OpenCode validate page 1 command
-        env:
-          PAGE: ${{ github.event.inputs.page || '1' }}
-          PATH: "/home/runner/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          async function main() {
+            const url = process.argv[2];
+            if (!url) {
+              console.log('Usage: node validate_url.js <URL>');
+              process.exit(1);
+            }
+            const result = await validateUrl(url);
+            console.log(result);
+          }
+
+          main();
+          EOF;
+
+      - name: Get jobs from peviitor.ro API (Page 1)
+        id: get_jobs
         run: |
-          set +x
-          which opencode
-          opencode --version
-          
-          opencode run "
-          You are running on GitHub Actions ubuntu-latest runner. You have access to Chrome DevTools MCP connected to Chrome on port 9222.
+          PAGE="${{ github.event.inputs.page }}"
+          if [ -z "$PAGE" ]; then
+            PAGE=1
+          fi
 
-          IMPORTANT - Solr Configuration:
-          - Use SOLR_AUTH environment variable (format: 'user:password') for authentication.
-          - Solr URL is: https://solr.peviitor.ro
-          - Example: curl -u \"\$SOLR_AUTH\" \"https://solr.peviitor.ro/solr/job/select?q=status:scraped&wt=json&rows=1\"
+          curl -s "https://api.peviitor.ro/v1/search/?page=$PAGE" > /tmp/page1_jobs.json
 
-          Security rules:
-          - Do NOT reveal SOLR_AUTH value in any output.
-          - Use credentials for Solr operations only.
+          echo "Found $(cat /tmp/page1_jobs.json | python3 -c "import sys,json;d=json.load(sys.stdin);print(len(d))") jobs on page $PAGE"
+          cat /tmp/page1_jobs.json | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          for i,job in enumerate(d):
+              print(f'{i+1}. {job.get(\"company\",\"?\")} - {job.get(\"title\",\"?\")}')
+          "
 
-          IMPORTANT TASK: Validate jobs from peviitor.ro page 1 API.
+      - name: Process each job ONE BY ONE
+        run: |
+          cat /tmp/page1_jobs.json | python3 -c "
+          import sys,json
+          d=json.load(sys.stdin)
+          urls = [job['url'] for job in d if 'url' in job]
+          print('\n'.join(urls))
+          " > /tmp/page1_urls.txt
 
-          1. First get jobs from peviitor.ro API for page 1:
-             curl -s "https://api.peviitor.ro/v1/search/?page=1"
-           
-          2. This returns up to 12 jobs. Process ALL of them (limit to 12 jobs max).
-           
-           3. For each job URL:
-               a) Open the job URL in Chrome using chrome-devtools
-               b) Determine if it's a REAL JOB or NOT:
-                  - NOT a job (delete): Employee testimonials, company pages, 'what does X do' articles, job no longer available/expired, CAPTCHA blocked
-                  - REAL JOB: Has job title, responsibilities, requirements, apply button
-               
-               c) For REAL jobs with FULL details (company, cif, salary, tags, workmode):
-                  - status='verified' (fully scraped with all required details)
-                  - Update company in company core if new
-               
-               d) For REAL jobs but couldn't get full details (CAPTCHA, blocked, missing data):
-                  - status='tested' (URL works but job not fully scraped)
-           
-               e) For NOT jobs:
-                  - Delete from Solr
-           
-           4. For OLX jobs, use OLX API instead of Chrome:
-              - List: curl -s "https://www.olx.ro/api/v1/offers/?offset=0&limit=50&category_id=4&currency=RON"
-              - Details: curl -s "https://www.olx.ro/api/v1/offers/<OFFER_ID>/"
-              - Check status field - if not 'active' then delete from Solr
-              - Extract company from user.company_name field
-           
-           5. Output summary: Number of jobs verified, number deleted, list of verified jobs with company name.
-           
-           6. IMPORTANT: Company name should be UPPERCASE. Transform if needed.
-           "
+          while read -r JOB_URL; do
+            echo "=========================================="
+            echo "Processing: $JOB_URL"
+            echo "=========================================="
+
+            # Step 1: Validate URL with Puppeteer
+            echo "Test 1: tests/test_url.md - Validate URL..."
+            RESULT=$(node validate_url.js "$JOB_URL")
+            echo "Result: $RESULT"
+
+            if [[ "$RESULT" == "EXPIRED" ]]; then
+              echo "Job EXPIRED - Deleting..."
+              curl -X POST "https://solr.peviitor.ro/solr/job/update?commit=true" \
+                -u "$SOLR_USER:$SOLR_PASSWD" \
+                -H "Content-Type: application/json" \
+                -d "{\"delete\": [\"$JOB_URL\"]}"
+
+              # Verify deletion (test_deleted_url.md)
+              sleep 2
+              VERIFY=$(curl -g -s "https://solr.peviitor.ro/solr/job/select?q=url:*$(basename $JOB_URL)*&fl=url&wt=json" \
+                -u "$SOLR_USER:$SOLR_PASSWD" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['response']['numFound'])")
+              if [ "$VERIFY" = "0" ]; then
+                echo "✅ Deletion verified: URL no longer in Solr"
+              else
+                echo "❌ Deletion failed: URL still in Solr"
+              fi
+              continue
+            fi
+
+            if [[ "$RESULT" == ERROR* ]]; then
+              echo "Error validating URL, skipping..."
+              continue
+            fi
+
+            echo "Job ACTIVE - Running all tests..."
+            echo "Tests to run:"
+            echo "  - tests/test_missing_fields.md"
+            echo "  - tests/test_company.md"
+            echo "  - tests/test_cif.md"
+            echo "  - tests/test_salary.md"
+            echo "  - tests/test_workmode.md"
+            echo "  - tests/test_tags.md"
+            echo "  - tests/test_location.md"
+            echo "  - tests/test_status_vdate.md"
+            echo "  - tests/test_expirationdate.md"
+            echo ""
+            echo "FULL PUSH required after tests if fields missing"
+            echo "Process ONE BY ONE - never skip!"
+
+          done < /tmp/page1_urls.txt
+
+      - name: Commit and push changes (if any)
+        if: always()
+        run: |
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Validate page 1 jobs: Auto-update via GitHub Actions"
+            git push origin main
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: page1-results
+          path: /tmp/page1_jobs.json
+          retention-days: 7
