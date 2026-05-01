@@ -103,3 +103,7 @@ jobs:
             /tmp/jobs.json
             /tmp/prompt.txt
           retention-days: 7
+
+      - name: Run OpenCode to process job
+        run: |
+          opencode --non-interactive -f /tmp/prompt.txt
