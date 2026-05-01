@@ -2,6 +2,14 @@
 
 When working with this project, follow these steps:
 
+## CRITICAL: Process Jobs ONE BY ONE
+**NEVER skip any job!** Process each job individually:
+1. Take ONE job from Solr (sorted by date asc, without CIF, excluding none)
+2. Run ALL tests from `tests/` folder on THAT job
+3. If test FAILS → FIX the problem → RETEST that job
+4. Only AFTER tests pass → move to next job
+5. Repeat until all jobs are processed
+
 ## 1. Read Documentation First
 - Start by reading `INSTRUCTIONS.md` in this directory to understand the project context
 - Check for any existing documentation before making assumptions
@@ -48,12 +56,10 @@ This returns the first page of jobs with their URLs.
 
 ### Step 2: Check Each Job URL
 For each job URL:
-1. Open the URL in Chrome using Chrome DevTools (`chrome-devtools_navigate_page`)
-2. Take a snapshot to see the content
-3. **CHECK FOR 404 / EXPIRED**:
+1. **CHECK FOR 404 / EXPIRED**:
    - If HTTP 404 error → **DELETE from Solr immediately**
    - If page contains: "expired", "no longer available", "anunt expirat", "locul nu mai este disponibil" → **DELETE from Solr immediately**
-4. Determine if it's a **real job** or **NOT a job**:
+2. Determine if it's a **real job** or **NOT a job**:
    - **NOT a job** (delete): Employee testimonials, company culture pages, "Meet our team" pages, 404 errors, expired jobs
    - **Real job**: Has job title, responsibilities, requirements, apply button/form
 
@@ -61,6 +67,28 @@ For each job URL:
 - HTTP 404 error → `curl -g -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" "https://solr.peviitor.ro/solr/job/update?commit=true" -d '{"delete": ["<JOB_URL>"]}'`
 - Page shows "expired", "anunt expirat" → DELETE
 - Not a real job (testimonial, company page) → DELETE
+
+### Step 2b: Validate with Puppeteer (MANDATORY before DELETE)
+**CRITICAL**: Never delete a job without verifying with puppeteer first! Some sites (AECOM, Oracle) return HTTP 200 but show "job filled" dynamically.
+
+Use this Node.js script:
+```bash
+node -e "
+const puppeteer = require('puppeteer');
+(async () => {
+    const browser = await puppeteer.launch({headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox']});
+    const page = await browser.newPage();
+    await page.goto('URL_HERE', {timeout: 15000});
+    await new Promise(r => setTimeout(r, 3000));
+    const text = await page.evaluate(() => document.body.innerText);
+    const expired = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare'].some(i => text.toLowerCase().includes(i));
+    console.log(expired ? 'EXPIRED' : 'ACTIVE');
+    await browser.close();
+})();
+"
+```
+
+**Why puppeteer?** Curl only checks HTTP status. Puppeteer executes JavaScript and reads the actual page content after dynamic loading!
 
 ### Step 3: For Real Jobs - Extract Data
 From the job page, extract:
@@ -120,20 +148,46 @@ curl -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
 See [OLX.md](./OLX.md) for how to verify and scrape OLX jobs using their official API.
 
 ## 8. Testing All Job Fields
-**CRITICAL**: After validating a job, run ALL tests in `tests/` folder:
+**CRITICAL RULE: ALL JOBS ARE SUBJECT TO BE TESTED - WE DO NOT SKIP ANY JOB BY ANY MEANS!!!**
+
+This means:
+- OLX jobs → TEST
+- ADOBE jobs → TEST
+- DELGAZ jobs → TEST
+- EVERY job in Solr → TEST
+
+**CRITICAL RETEST RULE: If any test is FAILING we DO FIX all problems then we RETEST that job once again!**
+
+**ALL TESTS FOR EACH JOB:**
+- `tests/test_url.md` - Check URL validity (404, expired, not-a-job)
+- `tests/test_deleted_url.md` - **RUN ONLY AFTER DELETE ACTION**
+- `tests/test_location_romania.md` - Check Romanian cities
+- `tests/test_missing_fields.md` - Verify all 11 Job Model fields
+- `tests/test_extra_fields.md` - Remove non-model fields
+- `tests/test_company.md` - UPPERCASE + ANAF verify
+- `tests/test_cif.md` - Numeric CIF verification
+- `tests/test_salary.md` - "MIN-MAX RON" array format
+- `tests/test_workmode.md` - remote/on-site/hybrid only
+- `tests/test_tags.md` - Max 10 tags with experience level
+- `tests/test_location.md` - Array of Romanian cities
+- `tests/test_status_vdate.md` - Valid status + ISO8601
+- `tests/test_expirationdate.md` - Date + 30 days
+
+**CRITICAL**: Run ALL applicable tests for EVERY job before marking complete!
 
 ### Required Tests for Each Job:
 0. **URL** (`tests/test_url.md`): Check 404, expired, not-a-job → DELETE if invalid
-1. **Location Romania** (`tests/test_location_romania.md`): MUST have at least one Romanian city → DELETE if ALL foreign
-2. **Missing Fields** (`tests/test_missing_fields.md`): Verify ALL 11 Job Model fields are present
-3. **Company** (`tests/test_company.md`): Must be UPPERCASE, verify via web search
-4. **CIF** (`tests/test_cif.md`): Must be numeric, verify on ANAF/listafirme.ro
-5. **Salary** (`tests/test_salary.md`): Format "MIN-MAX RON", must be array
-6. **Workmode** (`tests/test_workmode.md`): Only "remote", "on-site", "hybrid"
-7. **Tags** (`tests/test_tags.md`): Max 10 tags, include experience level
-8. **Location** (`tests/test_location.md`): Array of Romanian city names
-9. **Status/Vdate** (`tests/test_status_vdate.md`): Valid status, ISO8601 format
-10. **Expirationdate** (`tests/test_expirationdate.md`): Scrape date + 30 days
+1. **Deleted URL** (`tests/test_deleted_url.md`): Verify deleted URL is NO longer in Solr
+2. **Location Romania** (`tests/test_location_romania.md`): MUST have at least one Romanian city → DELETE if ALL foreign
+3. **Missing Fields** (`tests/test_missing_fields.md`): Verify ALL 11 Job Model fields are present
+4. **Company** (`tests/test_company.md`): Must be UPPERCASE, verify via web search
+5. **CIF** (`tests/test_cif.md`): Must be numeric, verify on ANAF/listafirme.ro
+6. **Salary** (`tests/test_salary.md`): Format "MIN-MAX RON", must be array
+7. **Workmode** (`tests/test_workmode.md`): Only "remote", "on-site", "hybrid"
+8. **Tags** (`tests/test_tags.md`): Max 10 tags, include experience level
+9. **Location** (`tests/test_location.md`): Array of Romanian city names
+10. **Status/Vdate** (`tests/test_status_vdate.md`): Valid status, ISO8601 format
+11. **Expirationdate** (`tests/test_expirationdate.md`): Scrape date + 30 days
 
 ### Test Execution:
 For each test file:

@@ -21,4 +21,12 @@ PASS CRITERIA:
 - Salary is in format "MIN-MAX RON" (or "MIN RON")
 - Salary is an array: ["3200-4300 RON"]
 - Currency is RON (not lei, EUR, etc.)
+- **INVALID salaries: "0-0 RON", "0 RON", empty, null → OMIT the salary field completely!**
 - Update uses FULL PUSH (not atomic update)
+
+INVALID SALARY EXAMPLES (MUST BE OMITTED):
+- "0-0 RON" ❌
+- "0 RON" ❌
+- "" ❌
+- null ❌
+- [] ❌

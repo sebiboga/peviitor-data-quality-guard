@@ -2,6 +2,14 @@
 
 This directory contains project files for interacting with the peviitor.ro job search platform.
 
+## CRITICAL: Process Jobs ONE BY ONE
+**NEVER skip any job!** Process each job individually:
+1. Take ONE job from Solr (sorted by date asc, without CIF, excluding none)
+2. Run ALL tests from `tests/` folder on THAT job
+3. If test FAILS → FIX the problem → RETEST that job
+4. Only AFTER tests pass → move to next job
+5. Repeat until all jobs are processed
+
 ## Key Resources
 
 ### 1. Job & Company Models
@@ -68,19 +76,61 @@ curl -s "https://api.peviitor.ro/v1/search/?page=1"
 
 ### Step 2: Check Each Job URL
 For each job URL from the API:
-1. Open the URL in Chrome using Chrome DevTools
-2. **CHECK FOR 404 / PAGE NOT FOUND**:
+1. **CHECK FOR 404 / PAGE NOT FOUND**:
    - If URL returns HTTP 404 (or similar error) → **DELETE from Solr immediately**
    - If page shows "Job expired", "No longer available", "Anunt expirat" → **DELETE from Solr immediately**
-3. Determine if it's a **real job** or **not a job** (testimonials, company pages, etc.)
-4. If NOT a real job (e.g., employee testimonials, company culture pages) → **DELETE from Solr**
-5. If real job → proceed to extract data
+2. Determine if it's a **real job** or **not a job** (testimonials, company pages, etc.)
+3. If NOT a real job (e.g., employee testimonials, company culture pages) → **DELETE from Solr**
+4. If real job → proceed to extract data
 
 **IMPORTANT DELETE CONDITIONS:**
 - HTTP 404 error
-- Page contains: "expired", "no longer available", "anunt expirat", "locul nu mai este disponibil"
+- Page contains: "expired", "no longer available", "anunt expirat", "locul nu mai este disponibil", "job filled", "ocupat"
 - Page is a testimonial/company page (not a job description)
 - DELETE command: `curl -g -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" "https://solr.peviitor.ro/solr/job/update?commit=true" -d '{"delete": ["<JOB_URL>"]}'`
+
+### Step 2b: Validate Job Page with Puppeteer (MANDATORY for DELETE)
+Before deleting ANY job, ALWAYS verify with puppeteer to detect dynamic content expiration:
+
+```javascript
+const puppeteer = require('puppeteer');
+
+(async () => {
+    const browser = await puppeteer.launch({
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+    });
+    
+    const page = await browser.newPage();
+    await page.goto(url, { timeout: 15000 });
+    await new Promise(r => setTimeout(r, 3000)); // Wait for dynamic content
+    
+    const text = await page.evaluate(() => document.body.innerText);
+    
+    const expiredIndicators = [
+        'no longer available',
+        'this job is no longer available',
+        'expired',
+        '404',
+        'page not found',
+        'job filled',
+        'ocupat',
+        'închis',
+        'similar jobs',
+        'joburi similare'
+    ];
+    
+    const isExpired = expiredIndicators.some(ind => 
+        text.toLowerCase().includes(ind.toLowerCase())
+    );
+    
+    console.log(isExpired ? 'EXPIRED' : 'ACTIVE');
+    
+    await browser.close();
+})();
+```
+
+**Why puppeteer?** Some job sites (like AECOM, Oracle) return HTTP 200 but show "job filled" or "expired" messages via JavaScript. Curl alone cannot detect these!
 
 ### Step 3: For Real Jobs - Extract & Verify Data
 Scrape the following from the job page:
@@ -150,12 +200,38 @@ curl -g -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json"
 See [OLX.md](./OLX.md) for how to verify and scrape OLX jobs using their official API.
 
 ## Testing All Job Fields
-**IMPORTANT**: Before finishing validation, run ALL tests in `tests/` folder to verify each field:
+**CRITICAL RULE: ALL JOBS ARE SUBJECT TO BE TESTED - WE DO NOT SKIP ANY JOB BY ANY MEANS!!!**
+
+This means:
+- OLX jobs → TEST
+- ADOBE jobs → TEST
+- DELGAZ jobs → TEST
+- EVERY job in Solr → TEST
+
+**CRITICAL RETEST RULE: If any test is FAILING we DO FIX all problems then we RETEST that job once again!**
+
+**ALL TESTS FOR EACH JOB:**
+- `tests/test_url.md` - Check URL validity (404, expired, not-a-job)
+- `tests/test_deleted_url.md` - **RUN ONLY AFTER DELETE ACTION**
+- `tests/test_location_romania.md` - Check Romanian cities
+- `tests/test_missing_fields.md` - Verify all 11 Job Model fields
+- `tests/test_extra_fields.md` - Remove non-model fields
+- `tests/test_company.md` - UPPERCASE + ANAF verify
+- `tests/test_cif.md` - Numeric CIF verification
+- `tests/test_salary.md` - "MIN-MAX RON" array format
+- `tests/test_workmode.md` - remote/on-site/hybrid only
+- `tests/test_tags.md` - Max 10 tags with experience level
+- `tests/test_location.md` - Array of Romanian cities
+- `tests/test_status_vdate.md` - Valid status + ISO8601
+- `tests/test_expirationdate.md` - Date + 30 days
+
+**IMPORTANT**: Run ALL applicable tests for EVERY job before marking complete!
 
 ### Test Files:
 | Test File | Field(s) Tested | Description |
 |-----------|------------------|-------------|
 | `tests/test_url.md` | `url` | 404 errors, expired jobs, not-a-job pages → DELETE |
+| `tests/test_deleted_url.md` | `url` | Verify deleted URL is NO longer in Solr |
 | `tests/test_location_romania.md` | `location` | MUST have at least one Romanian city → DELETE if all foreign |
 | `tests/test_missing_fields.md` | ALL fields | Check Job Model compliance (11 fields) |
 | `tests/test_extra_fields.md` | EXTRA fields | Remove unnecessary fields |
