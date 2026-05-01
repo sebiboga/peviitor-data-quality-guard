@@ -30,7 +30,7 @@ jobs:
 
       - name: Setup PATH
         run: |
-          export PATH="/home/sebi/.opencode/bin:$PATH"
+          export PATH="/home/runner/.opencode/bin:$PATH"
           echo "$PATH" >> $GITHUB_PATH
 
       - name: Copy opencode.json
@@ -54,25 +54,23 @@ jobs:
 
       - name: Run OpenCode validate page 1 command
         env:
-          SOLR_USER: ${{ secrets.SOLR_USER }}
-          SOLR_PASSWD: ${{ secrets.SOLR_PASSWD }}
           PAGE: ${{ github.event.inputs.page || '1' }}
-          PATH: "/home/sebi/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+          PATH: "/home/runner/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         run: |
           set +x
           which opencode
           opencode --version
           
           opencode run "
-          You are running on self-hosted runner (PI400). You have access to Chrome DevTools MCP connected to Chrome on port 9222.
+          You are running on GitHub Actions ubuntu-latest runner. You have access to Chrome DevTools MCP connected to Chrome on port 9222.
 
           IMPORTANT - Solr Configuration:
-          - Use SOLR_USER and SOLR_PASSWD environment variables for authentication.
+          - Use SOLR_AUTH environment variable (format: 'user:password') for authentication.
           - Solr URL is: https://solr.peviitor.ro
-          - Example: curl -u \"\$SOLR_USER:\$SOLR_PASSWD\" \"https://solr.peviitor.ro/solr/job/select?q=status:scraped&wt=json&rows=1\"
+          - Example: curl -u \"\$SOLR_AUTH\" \"https://solr.peviitor.ro/solr/job/select?q=status:scraped&wt=json&rows=1\"
 
           Security rules:
-          - Do NOT reveal SOLR_USER or SOLR_PASSWD values in any output.
+          - Do NOT reveal SOLR_AUTH value in any output.
           - Use credentials for Solr operations only.
 
           IMPORTANT TASK: Validate jobs from peviitor.ro page 1 API.
