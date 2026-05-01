@@ -124,15 +124,16 @@ See [OLX.md](./OLX.md) for how to verify and scrape OLX jobs using their officia
 
 ### Required Tests for Each Job:
 0. **URL** (`tests/test_url.md`): Check 404, expired, not-a-job → DELETE if invalid
-1. **Missing Fields** (`tests/test_missing_fields.md`): Verify ALL 11 Job Model fields are present
-2. **Company** (`tests/test_company.md`): Must be UPPERCASE, verify via web search
-3. **CIF** (`tests/test_cif.md`): Must be numeric, verify on ANAF/listafirme.ro
-4. **Salary** (`tests/test_salary.md`): Format "MIN-MAX RON", must be array
-5. **Workmode** (`tests/test_workmode.md`): Only "remote", "on-site", "hybrid"
-6. **Tags** (`tests/test_tags.md`): Max 10 tags, include experience level
-7. **Location** (`tests/test_location.md`): Array of Romanian city names
-8. **Status/Vdate** (`tests/test_status_vdate.md`): Valid status, ISO8601 format
-9. **Expirationdate** (`tests/test_expirationdate.md`): Scrape date + 30 days
+1. **Location Romania** (`tests/test_location_romania.md`): MUST have at least one Romanian city → DELETE if ALL foreign
+2. **Missing Fields** (`tests/test_missing_fields.md`): Verify ALL 11 Job Model fields are present
+3. **Company** (`tests/test_company.md`): Must be UPPERCASE, verify via web search
+4. **CIF** (`tests/test_cif.md`): Must be numeric, verify on ANAF/listafirme.ro
+5. **Salary** (`tests/test_salary.md`): Format "MIN-MAX RON", must be array
+6. **Workmode** (`tests/test_workmode.md`): Only "remote", "on-site", "hybrid"
+7. **Tags** (`tests/test_tags.md`): Max 10 tags, include experience level
+8. **Location** (`tests/test_location.md`): Array of Romanian city names
+9. **Status/Vdate** (`tests/test_status_vdate.md`): Valid status, ISO8601 format
+10. **Expirationdate** (`tests/test_expirationdate.md`): Scrape date + 30 days
 
 ### Test Execution:
 For each test file:

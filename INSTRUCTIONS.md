@@ -156,7 +156,9 @@ See [OLX.md](./OLX.md) for how to verify and scrape OLX jobs using their officia
 | Test File | Field(s) Tested | Description |
 |-----------|------------------|-------------|
 | `tests/test_url.md` | `url` | 404 errors, expired jobs, not-a-job pages → DELETE |
+| `tests/test_location_romania.md` | `location` | MUST have at least one Romanian city → DELETE if all foreign |
 | `tests/test_missing_fields.md` | ALL fields | Check Job Model compliance (11 fields) |
+| `tests/test_extra_fields.md` | EXTRA fields | Remove unnecessary fields |
 | `tests/test_company.md` | `company` | Must be UPPERCASE, verify via ANAF |
 | `tests/test_cif.md` | `cif` | Must be numeric, verify exists |
 | `tests/test_salary.md` | `salary` | Format: "MIN-MAX RON", must be array |
