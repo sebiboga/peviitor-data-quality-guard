@@ -65,6 +65,9 @@ jobs:
           main();
           EOF'
 
+      - name: Install OpenCode
+        run: npm install -g @opencode-ai/opencode
+
       - name: Get 1 job
         run: |
           curl -g "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=vdate+asc&fl=*&wt=json&rows=1" \
