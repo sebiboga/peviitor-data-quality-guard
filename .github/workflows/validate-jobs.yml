@@ -19,6 +19,11 @@ jobs:
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Get 1 job
         run: |
           curl -g "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=vdate+asc&fl=*&wt=json&rows=1" \
