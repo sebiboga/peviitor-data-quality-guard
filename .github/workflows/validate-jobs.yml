@@ -77,18 +77,22 @@ jobs:
       - name: Create prompt for OpenCode
         run: |
           TODAY=$(date +%Y-%m-%d)
-          cat > /tmp/prompt.txt << 'EOF'
-          HEY OPENCODE!
-          Today: $TODAY
-          Jobs: /tmp/jobs.json
-
-          FOR EACH JOB:
-          1. Read vdate
-          2. IF vdate starts with '$TODAY' → SKIP (don't test)
-          3. ELSE → TEST using tests/*.md
-
-          KEEP IT SIMPLE: Skip if vdate=$TODAY, test otherwise.
-          'EOF'
+          echo "HEY OPENCODE!" > /tmp/prompt.txt
+          echo "" >> /tmp/prompt.txt
+          echo "Today: $TODAY" >> /tmp/prompt.txt
+          echo "" >> /tmp/prompt.txt
+          echo "Jobs: /tmp/jobs.json" >> /tmp/prompt.txt
+          echo "" >> /tmp/prompt.txt
+          echo "YOUR TASK:" >> /tmp/prompt.txt
+          echo "For EACH job:" >> /tmp/prompt.txt
+          echo "1. Read vdate" >> /tmp/prompt.txt
+          echo "2. IF vdate starts with '$TODAY' → SKIP (don't test)" >> /tmp/prompt.txt
+          echo "3. ELSE → TEST using tests/*.md" >> /tmp/prompt.txt
+          echo "" >> /tmp/prompt.txt
+          echo "KEEP IT SIMPLE:" >> /tmp/prompt.txt
+          echo "- Skip if vdate=$TODAY" >> /tmp/prompt.txt
+          echo "- Test if vdate≠$TODAY" >> /tmp/prompt.txt
+          echo "- Process ONE BY ONE" >> /tmp/prompt.txt
           cat /tmp/prompt.txt
 
       - name: Upload
