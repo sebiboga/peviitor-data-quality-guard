@@ -1,47 +1,4 @@
-name: Validate Jobs Batch
+name: Validate Jobs
 
 on:
-  schedule:
-    - cron: '*/30 * * * *'
   workflow_dispatch:
-
-jobs:
-  prepare:
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    env:
-      SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Get 1 job (test)
-        run: |
-          curl -g "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=vdate+asc&fl=*&wt=json&rows=1" \
-            -u "$SOLR_AUTH" -o /tmp/jobs.json
-          cat /tmp/jobs.json
-      
-      - name: Create prompt
-        run: |
-          TODAY=$(date +%Y-%m-%d)
-          cat > /tmp/prompt.txt << EOF
-HEY OPENCODE!
-Today: $TODAY
-Jobs: /tmp/jobs.json
-
-FOR EACH JOB:
-1. Read vdate
-2. IF vdate starts with '$TODAY' → SKIP (don't test)
-3. ELSE → TEST using tests/*.md
-
-KEEP IT SIMPLE: Skip if vdate=$TODAY, test otherwise.
-EOF
-          cat /tmp/prompt.txt
-      
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: batch
-          path: |
-            /tmp/jobs.json
-            /tmp/prompt.txt
-          retention-days: 7
