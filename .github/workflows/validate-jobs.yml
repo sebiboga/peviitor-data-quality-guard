@@ -14,6 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Git
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+
       - name: Get 1 job
         run: |
           curl -g "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=vdate+asc&fl=*&wt=json&rows=1" \
