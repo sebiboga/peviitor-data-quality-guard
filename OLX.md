@@ -45,28 +45,43 @@ From the API response, extract these fields:
 
 When you find an OLX job URL in peviitor.ro results:
 
-1. **Extract the offer ID** from the URL:
-   - URL: `https://www.olx.ro/oferta/loc-de-munca/lidl-vanzator-radauti-IDkcZUF.html`
-   - ID: `300079886` (you need to call the list API to get IDs, or search in API response)
-
-2. **Call the API** to get full job details:
+1. **Get the offer ID by searching in the list API**:
    ```bash
-   curl -s "https://www.olx.ro/api/v1/offers/<OFFER_ID>/"
+   curl -s "https://www.olx.ro/api/v1/offers/?offset=0&limit=100&category_id=4&currency=RON" | jq '.data[] | select(.url | contains("PARTIAL_URL_SLUG")) | {id, title, status}'
+   ```
+   Replace `PARTIAL_URL_SLUG` with a unique part of the URL (e.g., `shop-gomega-image-s6`)
+
+2. **Call the API** with numeric ID to get full job details:
+   ```bash
+   curl -s "https://www.olx.ro/api/v1/offers/<NUMERIC_ID>/"
    ```
 
-3. **Check if job is active** - if `"status":"active"` then it's valid
+3. **Extract data from API response**:
+   - **company**: `user.company_name` (if null, use "OLX" or extract from title)
+   - **salary**: `salary.from` and `salary.to` → format as "FROM-TO RON"
+   - **location**: `location.city.name`
+   - **workmode**: Check `params[]` for remote/hybrid flags or default to "on-site"
+   - **tags**: Extract from `params[]`:
+     - `type` → full-time/part-time
+     - `tip_contract` → contract type
+     - `nivel_experienta` → entry/mid/senior
+     - `program_demunca` → schedule type
+     - `open_for_students` → students
+   - **status**: If `"status":"active"` → valid, otherwise DELETE
 
-4. **Extract company** from `user.company_name` field
+4. **For CIF** - search web for company CIF using the company name
 
-5. **For CIF** - search web for company CIF using the company name
+5. **Update job in Solr** with FULL PUSH (all fields)
 
 ## Handling OLX Jobs in Verification Workflow
 
 When peviitor.ro returns an OLX URL:
-1. Try to fetch via WebFetch - if blocked by CAPTCHA → DELETE
-2. If accessible → Use OLX API to get details and verify it's active
-3. Extract company name from API and search for CIF
-4. Update job in Solr with verified data
+1. **Use OLX API** (not Chrome) to get job details
+2. Extract offer ID from list API by matching URL slug
+3. Call single offer API with numeric ID
+4. If status is not "active" → DELETE from Solr
+5. If active → extract all fields, find CIF, update Solr with FULL PUSH
+6. **No Chrome needed for OLX jobs!**
 
 ## Example: Verify OLX Job
 

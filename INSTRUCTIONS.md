@@ -30,16 +30,18 @@ curl -u "$SOLR_USER:$SOLR_PASSWD" "https://solr.peviitor.ro/solr/company/schema"
 |-------|------|----------|-------------|
 | `url` | string | Yes | Full URL to job detail page (unique key) |
 | `title` | text_general | Yes | Position title |
-| `company` | string | No | Hiring company name |
+| `company` | string | No | Hiring company name (UPPERCASE) |
 | `cif` | string | No | CIF/CUI of the company |
-| `location` | text_general | No | Romanian cities/addresses |
-| `tags` | text_general[] | No | Skills/education/experience |
+| `location` | text_general[] | No | Romanian cities/addresses |
+| `tags` | text_general[] | No | Skills/education/experience (max 10) |
 | `workmode` | string | No | "remote", "on-site", "hybrid" |
 | `date` | pdate | No | Scrape date (ISO8601) |
 | `status` | string | No | "scraped", "tested", "published", "verified" |
 | `vdate` | pdate | No | Verified date |
 | `expirationdate` | pdate | No | Job expiration date |
 | `salary` | text_general | No | Format: "MIN-MAX CURRENCY" |
+
+**IMPORTANT**: When doing FULL PUSH, include ALL fields that are present. Missing fields will be deleted!
 
 ## Company Model Fields (from Solr)
 
@@ -73,14 +75,16 @@ For each job URL from the API:
 
 ### Step 3: For Real Jobs - Extract & Verify Data
 Scrape the following from the job page:
-- **company**: Company name (from page)
+- **company**: Company name (from page, convert to UPPERCASE)
 - **cif**: Company CIF/CUI (search web if not on page)
 - **salary**: Format "MIN-MAX RON" (convert "lei" to "RON")
-- **workmode**: "remote", "on-site", or "hybrid"
+- **workmode**: "remote", "on-site", or "hybrid" (check if job is in office, remote, or hybrid)
 - **tags**: Up to 10 tags - include:
   - Experience level: entry-level, mid-level, senior-level
-  - Skills/industry
-  - Years of experience if mentioned
+  - Skills/industry (e.g., "retail", "IT", "marketing")
+  - Job type: "full-time", "part-time", "internship"
+  - Contract: "permanent-contract", "temporary"
+  - Other: "students", "flexible-schedule", "qualified", etc.
 
 ### Step 4: Find Company CIF
 If CIF not visible on page:
@@ -89,42 +93,46 @@ If CIF not visible on page:
 3. Also check if company already exists in Solr company core
 
 ### Step 5: Update Company Core (if new/needed)
+Use **FULL PUSH** (complete document replace) - NOT atomic update:
 ```bash
 curl -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
   "https://solr.peviitor.ro/solr/company/update?commit=true" \
-  -d "{\"add\": {\"doc\": {\"id\": \"<CIF>\", \
-  \"company\": {\"set\": \"<company_name>\"}, \
-  \"brand\": {\"set\": \"<brand_name>\"}, \
-  \"website\": {\"set\": [\"<website>\"]}, \
-  \"career\": {\"set\": [\"<career_page>\"]}, \
-  \"lastScraped\": {\"set\": \"2026-03-09T00:00:00Z\"}}}}"
+  -d "[{\"id\": \"<CIF>\", \
+  \"company\": \"<company_name>\", \
+  \"brand\": \"<brand_name>\", \
+  \"website\": [\"<website>\"], \
+  \"career\": [\"<career_page>\"], \
+  \"lastScraped\": \"2026-03-09T00:00:00Z\"}]"
 ```
 
 ### Step 6: Push Job Update to SOLR
-Use **atomic update** to add verified fields:
+Use **FULL PUSH** (complete document replace) - NOT atomic update (which creates broken entries with /company#, /cif# suffixes):
 ```bash
 curl -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
   "https://solr.peviitor.ro/solr/job/update?commit=true" \
-  -d "{\"add\": {\"doc\": {\"url\": \"<JOB_URL>\", \
-  \"company\": {\"set\": \"<company>\"}, \
-  \"cif\": {\"set\": \"<cif>\"}, \
-  \"salary\": {\"set\": \"<salary>\"}, \
-  \"workmode\": {\"set\": \"<workmode>\"}, \
-  \"tags\": {\"set\": [\"tag1\", \"tag2\", \"tag3\"]}, \
-  \"status\": {\"set\": \"verified\"}, \
-  \"vdate\": {\"set\": \"2026-03-09T00:00:00Z\"}}}}"
+  -d "[{\"url\": \"<JOB_URL>\", \
+  \"title\": \"<title>\", \
+  \"company\": \"<company>\", \
+  \"cif\": \"<cif>\", \
+  \"location\": [\"<city>\"], \
+  \"salary\": [\"<salary>\"], \
+  \"workmode\": \"<workmode>\", \
+  \"tags\": [\"tag1\", \"tag2\"], \
+  \"status\": \"verified\", \
+  \"date\": \"<scrape_date>\", \
+  \"vdate\": \"2026-05-01T00:00:00Z\"}]"
 ```
 
 ### Step 7: Verify the Update in SOLR
 Always query SOLR to confirm all fields were updated correctly:
 ```bash
-curl -u "$SOLR_USER:$SOLR_PASSWD" "https://solr.peviitor.ro/solr/job/select?q=url:<JOB_URL>&wt=json"
+curl -g -u "$SOLR_USER:$SOLR_PASSWD" "https://solr.peviitor.ro/solr/job/select?q=url:<JOB_URL>&wt=json&fl=*"
 ```
 
 ### Step 8: Handle Non-Job Pages
 If the URL is not a job description (testimonial, company page, etc.):
 ```bash
-curl -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
+curl -g -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
   "https://solr.peviitor.ro/solr/job/update?commit=true" \
   -d "{\"delete\": [\"<JOB_URL>\"]}"
 ```

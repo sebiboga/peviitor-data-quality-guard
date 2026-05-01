@@ -56,11 +56,16 @@ For each job URL:
 
 ### Step 3: For Real Jobs - Extract Data
 From the job page, extract:
-- **company**: Company name visible on page
+- **company**: Company name visible on page (convert to UPPERCASE)
 - **cif**: Search web for "COMPANY NAME CIF Romania" if not on page
 - **salary**: "MIN-MAX RON" format (convert "lei" to "RON")
-- **workmode**: "remote", "on-site", or "hybrid"
-- **tags** (max 10): Include experience level (entry/mid/senior), skills, industry
+- **workmode**: "remote", "on-site", or "hybrid" (check job location flexibility)
+- **tags** (max 10): Include:
+  - Experience level: entry-level, mid-level, senior-level
+  - Job type: full-time, part-time, internship
+  - Contract: permanent-contract, temporary
+  - Skills/industry: retail, IT, marketing, etc.
+  - Other: students, flexible-schedule, qualified, etc.
 
 ### Step 4: Update Company Core
 If company is new or needs updating:
