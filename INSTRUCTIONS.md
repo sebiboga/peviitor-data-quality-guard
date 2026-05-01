@@ -66,12 +66,45 @@ curl -u "$SOLR_USER:$SOLR_PASSWD" "https://solr.peviitor.ro/solr/company/schema"
 | `lastScraped` | string | No | Last scrape date (ISO8601) |
 | `scraperFile` | string | No | Name of scraper file used |
 
-## Workflow: Verifying Jobs from peviitor.ro First Page
+## Workflows (YAML Files)
+See `.github/workflows/` for GitHub Actions:
+- `validate-jobs.yml` - Main workflow for validating jobs
+  - **Runs every 30 minutes** (cron: '*/30 * * * *')
+  - **Timeout: 40 minutes** max per run
+  - **What it does:**
+    1. Gets jobs NOT validated today (vdate != today's date)
+    2. Validates URL with Puppeteer (MANDATORY before DELETE!)
+    3. If EXPIRED → DELETE + verify with test_deleted_url.md
+    4. If ACTIVE → Run ALL tests from `tests/` folder
+    5. Commits changes locally (NO push - disabled in Actions)
+  - **IMPORTANT:** Uses `SOLR_AUTH` secret (format: "user:password")
+  - **Secrets needed:** SOLR_AUTH, GITHUB_TOKEN
 
-### Step 1: Get Jobs from peviitor.ro API
-Query the peviitor.ro API to get the first page of jobs:
+- `test-page-1.yml` - Validates first page of peviitor.ro API
+  - **Runs every hour** (cron: '0 * * * *')
+  - Same validation logic as validate-jobs.yml
+  - Uses Puppeteer (NOT Chrome manual)
+
+### How to test locally:
 ```bash
-curl -s "https://api.peviitor.ro/v1/search/?page=1"
+# Test curl query to Solr (get jobs without CIF)
+curl -g -s 'https://solr.peviitor.ro/solr/job/select?q=*:*&fq=-cif:[*+TO+*]&rows=1&fl=url,company&wt=json' \
+  -u "solr:SolrRocks"
+
+# Test Puppeteer validation
+node -e "
+const puppeteer = require('puppeteer');
+(async () => {
+    const browser = await puppeteer.launch({headless: true, args: ['--no-sandbox']});
+    const page = await browser.newPage();
+    await page.goto('JOB_URL_HERE', {timeout: 15000});
+    await new Promise(r => setTimeout(r, 3000));
+    const text = await page.evaluate(() => document.body.innerText);
+    const expired = ['expired','404','job filled','ocupat'].some(i => text.toLowerCase().includes(i));
+    console.log(expired ? 'EXPIRED' : 'ACTIVE');
+    await browser.close();
+})();
+"
 ```
 
 ### Step 2: Check Each Job URL
