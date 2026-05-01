@@ -1,0 +1,64 @@
+name: Validate scraped Jobs from Solr
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Runs every 30 minutes
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Number of jobs to validate'
+        required: false
+        default: '1'
+
+
+jobs:
+  validate-scraped-jobs:
+    runs-on: ubuntu-latest
+    env:
+      SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start Chrome
+        run: |
+          pkill -f chrome 2>/dev/null || true
+          chromium --remote-debugging-port=9222 --headless --no-sandbox --disable-gpu &
+          sleep 3
+
+      - name: Setup PATH
+        run: |
+          export PATH="/home/runner/.opencode/bin:$PATH"
+          echo "$PATH" >> $GITHUB_PATH
+
+      - name: Copy opencode.json
+        run: |
+          cat > opencode.json << 'EOF'
+          {
+            "$schema": "https://opencode.ai/config.json",
+            "model": "opencode/big-pickle",
+            "mcp": {
+              "chrome-devtools": {
+                "type": "local",
+                "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:9222"]
+              },
+              "external-directory": {
+                "type": "local",
+                "command": ["npx", "-y", "external-directory-mcp@latest"]
+              }
+            }
+          }
+          EOF
+
+      - name: Run OpenCode
+        run: |
+          /home/runner/.opencode/bin/opencode run "Say hi"
+
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opencode-output
+          path: jobs.json
+          retention-days: 1

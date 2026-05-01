@@ -1,0 +1,110 @@
+name: Test Page 1 Validation
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Runs every hour
+  workflow_dispatch:
+    inputs:
+      page:
+        description: 'Page number to validate'
+        required: false
+        default: '1'
+        type: string
+
+
+jobs:
+  validate-page-1:
+    runs-on: ubuntu-latest
+    env:
+      SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start Chrome
+        run: |
+          pkill -f chrome 2>/dev/null || true
+          chromium --remote-debugging-port=9222 --headless --no-sandbox --disable-gpu &
+          sleep 3
+
+      - name: Setup PATH
+        run: |
+          export PATH="/home/sebi/.opencode/bin:$PATH"
+          echo "$PATH" >> $GITHUB_PATH
+
+      - name: Copy opencode.json
+        run: |
+          cat > opencode.json << 'EOF'
+          {
+            "$schema": "https://opencode.ai/config.json",
+            "model": "opencode/big-pickle",
+            "mcp": {
+              "chrome-devtools": {
+                "type": "local",
+                "command": ["npx", "-y", "chrome-devtools-mcp@latest", "--browser-url=http://localhost:9222"]
+              },
+              "external-directory": {
+                "type": "local",
+                "command": ["npx", "-y", "external-directory-mcp@latest"]
+              }
+            }
+          }
+          EOF
+
+      - name: Run OpenCode validate page 1 command
+        env:
+          SOLR_USER: ${{ secrets.SOLR_USER }}
+          SOLR_PASSWD: ${{ secrets.SOLR_PASSWD }}
+          PAGE: ${{ github.event.inputs.page || '1' }}
+          PATH: "/home/sebi/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        run: |
+          set +x
+          which opencode
+          opencode --version
+          
+          opencode run "
+          You are running on self-hosted runner (PI400). You have access to Chrome DevTools MCP connected to Chrome on port 9222.
+
+          IMPORTANT - Solr Configuration:
+          - Use SOLR_USER and SOLR_PASSWD environment variables for authentication.
+          - Solr URL is: https://solr.peviitor.ro
+          - Example: curl -u \"\$SOLR_USER:\$SOLR_PASSWD\" \"https://solr.peviitor.ro/solr/job/select?q=status:scraped&wt=json&rows=1\"
+
+          Security rules:
+          - Do NOT reveal SOLR_USER or SOLR_PASSWD values in any output.
+          - Use credentials for Solr operations only.
+
+          IMPORTANT TASK: Validate jobs from peviitor.ro page 1 API.
+
+          1. First get jobs from peviitor.ro API for page 1:
+             curl -s "https://api.peviitor.ro/v1/search/?page=1"
+           
+          2. This returns up to 12 jobs. Process ALL of them (limit to 12 jobs max).
+           
+           3. For each job URL:
+               a) Open the job URL in Chrome using chrome-devtools
+               b) Determine if it's a REAL JOB or NOT:
+                  - NOT a job (delete): Employee testimonials, company pages, 'what does X do' articles, job no longer available/expired, CAPTCHA blocked
+                  - REAL JOB: Has job title, responsibilities, requirements, apply button
+               
+               c) For REAL jobs with FULL details (company, cif, salary, tags, workmode):
+                  - status='verified' (fully scraped with all required details)
+                  - Update company in company core if new
+               
+               d) For REAL jobs but couldn't get full details (CAPTCHA, blocked, missing data):
+                  - status='tested' (URL works but job not fully scraped)
+           
+               e) For NOT jobs:
+                  - Delete from Solr
+           
+           4. For OLX jobs, use OLX API instead of Chrome:
+              - List: curl -s "https://www.olx.ro/api/v1/offers/?offset=0&limit=50&category_id=4&currency=RON"
+              - Details: curl -s "https://www.olx.ro/api/v1/offers/<OFFER_ID>/"
+              - Check status field - if not 'active' then delete from Solr
+              - Extract company from user.company_name field
+           
+           5. Output summary: Number of jobs verified, number deleted, list of verified jobs with company name.
+           
+           6. IMPORTANT: Company name should be UPPERCASE. Transform if needed.
+           "
