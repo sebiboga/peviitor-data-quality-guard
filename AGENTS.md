@@ -123,6 +123,7 @@ See [OLX.md](./OLX.md) for how to verify and scrape OLX jobs using their officia
 **CRITICAL**: After validating a job, run ALL tests in `tests/` folder:
 
 ### Required Tests for Each Job:
+0. **URL** (`tests/test_url.md`): Check 404, expired, not-a-job → DELETE if invalid
 1. **Company** (`tests/test_company.md`): Must be UPPERCASE, verify via web search
 2. **CIF** (`tests/test_cif.md`): Must be numeric, verify on ANAF/listafirme.ro
 3. **Salary** (`tests/test_salary.md`): Format "MIN-MAX RON", must be array

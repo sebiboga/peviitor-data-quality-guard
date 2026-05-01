@@ -155,6 +155,7 @@ See [OLX.md](./OLX.md) for how to verify and scrape OLX jobs using their officia
 ### Test Files:
 | Test File | Field(s) Tested | Description |
 |-----------|------------------|-------------|
+| `tests/test_url.md` | `url` | 404 errors, expired jobs, not-a-job pages → DELETE |
 | `tests/test_company.md` | `company` | Must be UPPERCASE, verify via ANAF |
 | `tests/test_cif.md` | `cif` | Must be numeric, verify exists |
 | `tests/test_salary.md` | `salary` | Format: "MIN-MAX RON", must be array |
