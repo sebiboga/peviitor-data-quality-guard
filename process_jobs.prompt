@@ -1,0 +1,24 @@
+HEY OPENCODE!
+
+Today is: $(date +%Y-%m-%d)
+
+I have jobs in /tmp/jobs.json from Solr (100 jobs batch).
+
+YOUR TASK:
+For EACH job in /tmp/jobs.json:
+  1. Read the 'vdate' field
+  2. IF vdate starts with '$(date +%Y-%m-%d)' → SKIP (don't test, job was validated today)
+  3. IF vdate is different or missing → TEST the job
+
+TO TEST A JOB:
+  - Read and execute tests/*.md (all test files)
+  - Use Puppeteer for URL validation (MANDATORY before DELETE)
+  - Do FULL PUSH to Solr after tests (wrap in array: [{"url": "...", ...}])
+  - Set vdate to $(date +%Y-%m-%d)T00:00:00Z after ALL tests pass
+
+KEEP IT SIMPLE:
+  - Skip if vdate = today ($(date +%Y-%m-%d))
+  - Test if vdate ≠ today or missing
+  - Process ONE BY ONE
+  - Run ALL tests from tests/*.md
+  - Use FULL PUSH (not atomic update)

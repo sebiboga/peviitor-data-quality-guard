@@ -1,213 +1,47 @@
-name: Validate Any Job
+name: Validate Jobs Batch
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Runs every 30 minutes
+    - cron: '*/30 * * * *'
   workflow_dispatch:
-    inputs:
-      limit:
-        description: 'Number of jobs to validate'
-        required: false
-        default: '1'
 
 jobs:
-  validate-jobs:
+  prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Git
+      - uses: actions/checkout@v4
+      
+      - name: Get 1 job (test)
         run: |
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Puppeteer
-        run: npm install -g puppeteer@latest
-
-      - name: Create validation script
+          curl -g "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=vdate+asc&fl=*&wt=json&rows=1" \
+            -u "$SOLR_AUTH" -o /tmp/jobs.json
+          cat /tmp/jobs.json
+      
+      - name: Create prompt
         run: |
-          cat > validate_url.js << 'EOF'
-          const puppeteer = require('puppeteer');
-
-          async function validateUrl(url) {
-            const browser = await puppeteer.launch({
-              headless: true,
-              args: ['--no-sandbox', '--disable-setuid-sandbox']
-            });
-            const page = await browser.newPage();
-            try {
-              await page.goto(url, {timeout: 15000});
-              await new Promise(r => setTimeout(r, 3000));
-              const text = await page.evaluate(() => document.body.innerText);
-              const expired = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare']
-                .some(i => text.toLowerCase().includes(i));
-              await browser.close();
-              return expired ? 'EXPIRED' : 'ACTIVE';
-            } catch(e) {
-              await browser.close();
-              return 'ERROR: ' + e.message;
-            }
-          }
-
-          async function main() {
-            const url = process.argv[2];
-            if (!url) {
-              console.log('Usage: node validate_url.js <URL>');
-              process.exit(1);
-            }
-            const result = await validateUrl(url);
-            console.log(result);
-          }
-
-          main();
-          EOF;
-
-      - name: Get jobs to validate (any job, prefer not validated today)
-        id: get_jobs
-        shell: bash
-        run: |
-          LIMIT="${{ github.event.inputs.limit }}"
-          if [ -z "$LIMIT" ]; then
-            LIMIT=1
-          fi;
-
-          echo "Fetching up to $LIMIT jobs to validate..."
-          # Get jobs where vdate is NOT today (ignore time, only check date)
-          # This catches: expired jobs, jobs needing re-validation
           TODAY=$(date +%Y-%m-%d)
-          TOMORROW=$(date -d tomorrow +%Y-%m-%d)
-          echo "Looking for jobs NOT validated today ($TODAY)..."
-          # Exclude jobs with vdate >= TODAY (meaning validated today or in future)
-          curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fq=-vdate:[$TODAYT00:00:00Z TO *]&sort=vdate+asc&fl=url,company,title,vdate,status,cif&wt=json&rows=$LIMIT" \
-            -u "$SOLR_AUTH" -o /tmp/jobs.json;
+          cat > /tmp/prompt.txt << EOF
+HEY OPENCODE!
+Today: $TODAY
+Jobs: /tmp/jobs.json
 
-          echo "=== Solr Response ==="
-          cat /tmp/jobs.json
-          echo ""
+FOR EACH JOB:
+1. Read vdate
+2. IF vdate starts with '$TODAY' → SKIP (don't test)
+3. ELSE → TEST using tests/*.md
 
-          # Validate JSON
-          if ! python3 -c "import sys,json;json.load(open('/tmp/jobs.json'))" 2>/dev/null; then
-            echo "❌ Invalid JSON - trying simpler query..."
-            # Fallback: get any jobs sorted by date (oldest first)
-            curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=date+asc&fl=url,company,title,vdate,status,cif&wt=json&rows=$LIMIT" \
-              -u "$SOLR_AUTH" -o /tmp/jobs.json;
-          fi;
-
-          echo "=== Solr Response ==="
-          cat /tmp/jobs.json
-          echo ""
-
-          # Validate JSON
-          if ! python3 -c "import sys,json;json.load(open('/tmp/jobs.json'))" 2>/dev/null; then
-            echo "❌ Invalid JSON response from Solr - trying simpler query..."
-            # Fallback: get any job sorted by date
-            curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=date+asc&fl=url,company,title,vdate,status,cif&wt=json&rows=$LIMIT" \
-              -u "$SOLR_AUTH" -o /tmp/jobs.json;
-          fi;
-
-          NUM_FOUND=$(cat /tmp/jobs.json | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['response']['numFound'])" 2>/dev/null || echo "0")
-          echo "Found $NUM_FOUND jobs to validate"
-
-          cat /tmp/jobs.json | python3 -c "
-          import sys,json
-          d=json.load(sys.stdin)
-          for i,doc in enumerate(d['response']['docs']):
-              vdate = doc.get('vdate','none')
-              status = doc.get('status','none')
-              cif = doc.get('cif','none')
-              print(f'{i+1}. {doc.get(\"company\")} - {doc.get(\"title\")} (vdate:{vdate}, status:{status}, cif:{cif})')
-          "
-
-      - name: Process each job ONE BY ONE
-        shell: bash
-        run: |
-          cat /tmp/jobs.json | python3 -c "
-          import sys,json
-          d=json.load(sys.stdin)
-          urls = [doc['url'] for doc in d['response']['docs']]
-          print('\n'.join(urls))
-          " > /tmp/urls.txt;
-
-          while read -r JOB_URL; do
-            echo "=========================================="
-            echo "Processing: $JOB_URL"
-            echo "=========================================="
-
-            # Step 1: Validate URL with Puppeteer (MANDATORY)
-            echo "Test 1: tests/test_url.md - Validate URL with Puppeteer..."
-            RESULT=$(node validate_url.js "$JOB_URL" 2>&1)
-            echo "Result: $RESULT"
-
-            if [[ "$RESULT" == "EXPIRED" ]]; then
-              echo "Job EXPIRED - Deleting..."
-              curl -X POST "https://solr.peviitor.ro/solr/job/update?commit=true" \
-                -u "$SOLR_AUTH" \
-                -H "Content-Type: application/json" \
-                -d "{\"delete\": [\"$JOB_URL\"]}"
-
-              # Verify deletion (test_deleted_url.md)
-              sleep 2
-              VERIFY=$(curl -g -s "https://solr.peviitor.ro/solr/job/select?q=url:*$(basename $JOB_URL)*&fl=url&wt=json" \
-                -u "$SOLR_AUTH" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['response']['numFound'])")
-              if [ "$VERIFY" = "0" ]; then
-                echo "✅ Deletion verified: URL no longer in Solr"
-              else
-                echo "❌ Deletion failed: URL still in Solr"
-              fi
-              continue
-            fi;
-
-            if [[ "$RESULT" == ERROR* ]]; then
-              echo "Error validating URL, skipping..."
-              continue
-            fi;
-
-            echo "Job ACTIVE - Running ALL tests..."
-            echo "Tests to run:"
-            echo "  - tests/test_missing_fields.md"
-            echo "  - tests/test_company.md"
-            echo "  - tests/test_cif.md"
-            echo "  - tests/test_salary.md"
-            echo "  - tests/test_workmode.md"
-            echo "  - tests/test_tags.md"
-            echo "  - tests/test_location.md"
-            echo "  - tests/test_status_vdate.md"
-            echo "  - tests/test_expirationdate.md"
-            echo ""
-            echo "TODO: Implement FULL PUSH after tests"
-            echo "Process ONE BY ONE - never skip!"
-
-          done < /tmp/urls.txt;
-
-      - name: Commit changes (if any)
-        if: always()
-        shell: bash
-        run: |
-          git add -A
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Validate jobs: Auto-update via GitHub Actions"
-            echo "Changes committed locally (push disabled in Actions)"
-          fi;
-
-      - name: Upload artifacts
-        if: always()
+KEEP IT SIMPLE: Skip if vdate=$TODAY, test otherwise.
+EOF
+          cat /tmp/prompt.txt
+      
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: validation-results
-          path: /tmp/jobs.json
+          name: batch
+          path: |
+            /tmp/jobs.json
+            /tmp/prompt.txt
           retention-days: 7

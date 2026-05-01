@@ -117,19 +117,28 @@ curl -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
 ```
 
 ### Step 5: Push Job Update
-Use atomic update with today's date:
+Use **FULL PUSH** (complete document array) - NOT atomic update (which creates broken entries with /company#, /cif# suffixes):
+
+**FULL PUSH Format (WRAP IN ARRAY):**
 ```bash
-curl -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
+curl -u "$SOLR_AUTH" -X POST -H "Content-Type: application/json" \
   "https://solr.peviitor.ro/solr/job/update?commit=true" \
-  -d "{\"add\": {\"doc\": {\"url\": \"<JOB_URL>\", \
-  \"company\": {\"set\": \"<company>\"}, \
-  \"cif\": {\"set\": \"<cif>\"}, \
-  \"salary\": {\"set\": \"<salary>\"}, \
-  \"workmode\": {\"set\": \"<workmode>\"}, \
-  \"tags\": {\"set\": [\"tag1\", \"tag2\"]}, \
-  \"status\": {\"set\": \"verified\"}, \
-  \"vdate\": {\"set\": \"2026-03-09T00:00:00Z\"}}}}"
+  -d "[{\"url\": \"<JOB_URL>\", \
+  \"title\": \"<title>\", \
+  \"company\": \"<company>\", \
+  \"cif\": \"<cif>\", \
+  \"location\": [\"<city>\"], \
+  \"salary\": [\"<salary>\"], \
+  \"workmode\": \"<workmode>\", \
+  \"tags\": [\"tag1\", \"tag2\"], \
+  \"status\": \"verified\", \
+  \"date\": \"<scrape_date>\", \
+  \"vdate\": \"2026-05-01T00:00:00Z\"}]"
 ```
+
+**Important:** 
+- Wrap document in `[...]` (array)
+- Include ALL fields that are present (missing fields will be deleted!)
 
 ### Step 6: Verify the Update
 ```bash
