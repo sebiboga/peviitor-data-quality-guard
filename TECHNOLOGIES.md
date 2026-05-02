@@ -53,8 +53,8 @@
 - **YAML workflows** (`.github/workflows/`)
   - `validate-jobs.yml` - Automated job validation
 - **GitHub Secrets**:
-  - `SOLR_USER` = "solr"
-  - `SOLR_PASSWD` = "SolrRocks"
+  - `SOLR_USER` - Solr username (from .env)
+  - `SOLR_PASSWD` - Solr password (from .env)
 
 ## Data Models & Validation
 
@@ -96,7 +96,7 @@
 ### FULL PUSH (Complete Document Replace)
 ```bash
 curl -X POST "https://solr.peviitor.ro/solr/job/update?commit=true" \
-  -u "solr:SolrRocks" -H "Content-Type: application/json" \
+  -u "$SOLR_USER:$SOLR_PASSWD" -H "Content-Type: application/json" \
   -d '[{
     "url": "...",
     "title": "...",
@@ -115,7 +115,7 @@ curl -X POST "https://solr.peviitor.ro/solr/job/update?commit=true" \
 ### DELETE Job
 ```bash
 curl -X POST "https://solr.peviitor.ro/solr/job/update?commit=true" \
-  -u "solr:SolrRocks" -H "Content-Type: application/json" \
+  -u "$SOLR_USER:$SOLR_PASSWD" -H "Content-Type: application/json" \
   -d '{"delete": ["<JOB_URL>"]}'
 ```
 

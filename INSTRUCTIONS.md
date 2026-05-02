@@ -89,7 +89,7 @@ See `.github/workflows/` for GitHub Actions:
 ```bash
 # Test curl query to Solr (get jobs without CIF)
 curl -g -s 'https://solr.peviitor.ro/solr/job/select?q=*:*&fq=-cif:[*+TO+*]&rows=1&fl=url,company&wt=json' \
-  -u "solr:SolrRocks"
+  -u "$SOLR_USER:$SOLR_PASSWD"
 
 # Test Puppeteer validation
 node -e "
