@@ -51,11 +51,7 @@ jobs:
           echo ""
           echo "=== PASUL 1 COMPLET ==="
       
-      # ==================== PAUZĂ 2 minute (prin job separation) ====================
-      - name: PAUZĂ 2 minute
         run: |
-          echo "PAUZĂ 2 minute înainte de PASUL 2.1..."
-          sleep 120
       
       # ==================== PASUL 2.1: TEST_URL.MD (VALIDARE URL) ====================
       - name: PASUL 2.1 - test_url.md (ACTIVE/EXPIRED)
@@ -90,7 +86,7 @@ jobs:
                   } else {
                       const text = await page.evaluate(() => document.body.innerText);
                       
-                      const expiredKeywords = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare','anunt expirat','locul nu mai este disponibil','oferta a expirat'];
+                      const expiredKeywords = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare','anunt expirat','locul nu mai este disponibil','oferta a expirat','no longer active'];
                       const isExpired = expiredKeywords.some(i => text.toLowerCase().includes(i));
                       
                       const isJob = text.toLowerCase().includes('responsabilit') || 
@@ -156,11 +152,7 @@ jobs:
           echo ""
           echo "=== PASUL 2.1 COMPLET ==="
 
-      # ==================== PAUZĂ 2 minute ====================
-      - name: PAUZĂ 2 minute
         run: |
-          echo "PAUZĂ 2 minute înainte de PASUL 2.2..."
-          sleep 120
 
       # ==================== PASUL 2.2: TEST_LOCATION_ROMANIA.MD ====================
       - name: PASUL 2.2 - test_location_romania.md
@@ -231,11 +223,7 @@ jobs:
           echo ""
           echo "=== PASUL 2.2 COMPLET ==="
 
-      # ==================== PAUZĂ 2 minute ====================
-      - name: PAUZĂ 2 minute
         run: |
-          echo "PAUZĂ 2 minute înainte de PASUL 2.3..."
-          sleep 120
 
       # ==================== AFIȘEAZĂ REZULTATUL FINAL ====================
       - name: Rezultat final
