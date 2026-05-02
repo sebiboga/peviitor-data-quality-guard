@@ -10,8 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
-      SOLR_USER: ${{ secrets.SOLR_USER }}
-      SOLR_PASSWD: ${{ secrets.SOLR_PASSWD }}
       SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
 
     steps:
@@ -41,7 +39,7 @@ jobs:
 
           # Salvează răspunsul Solr într-un fișier
           curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fl=url,title,company,vdate,location,date,status&wt=json&rows=1" \
-            -u "$SOLR_USER:$SOLR_PASSWD" -o /tmp/solr_response.json
+            -u "$SOLR_AUTH" -o /tmp/solr_response.json
 
           echo "Răspunsul de la Solr:"
           cat /tmp/solr_response.json
@@ -52,7 +50,11 @@ jobs:
 
           echo ""
           echo "=== PASUL 1 COMPLET ==="
-
+          
+          # PAUZĂ 2 minute înainte de următorul pas
+          echo "PAUZĂ 2 minute..."
+          sleep 120
+      
       # ==================== PASUL 2.1: TEST_URL.MD (VALIDARE URL) ====================
       - name: PASUL 2.1 - test_url.md (ACTIVE/EXPIRED)
         id: pasul21
@@ -119,7 +121,7 @@ jobs:
           if [ "$URL_STATUS" = "EXPIRED" ] || [ "$URL_STATUS" = "NOT_A_JOB" ]; then
               echo ""
               echo "=== ȘTERG JOB DIN SOLR ==="
-              curl -g -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
+              curl -g -u "$SOLR_AUTH" -X POST -H "Content-Type: application/json" \
                 "https://solr.peviitor.ro/solr/job/update?commit=true" \
                 -d "{\"delete\": [\"$JOB_URL\"]}"
 
@@ -128,7 +130,7 @@ jobs:
               # Folosește Python pentru a face escape la URL
               ENCODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")
               
-              curl -g -u "$SOLR_USER:$SOLR_PASSWD" \
+              curl -g -u "$SOLR_AUTH" \
                 "https://solr.peviitor.ro/solr/job/select?q=url:$ENCODED_URL&wt=json&rows=1" | python3 -c "
           import sys, json
           data = json.load(sys.stdin)
