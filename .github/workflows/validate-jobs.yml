@@ -54,7 +54,7 @@ jobs:
           URL_STATUS=$(cat /tmp/url_status.txt)
           echo "STATUS: $URL_STATUS"
           
-          # Handle OLX/Publi24 KEEP: set vdate=today with FULL PUSH, skip further validation
+          # Handle OLX_KEEP: set vdate=today with FULL PUSH, skip further validation
           if [ "$URL_STATUS" = "OLX_KEEP" ]; then
               echo "=== OLX/Publi24 KEEP: Set vdate=today ==="
               TODAY=$(date +%Y-%m-%d)
@@ -63,8 +63,8 @@ jobs:
                 "https://solr.peviitor.ro/solr/job/select?q=url:$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")&fl=*&wt=json&rows=1" \
                 -o /tmp/job_olx.json"
               
-              python3 -c "
-              import json, sys
+              python3 << 'EOF'
+              import json
               with open('/tmp/job_olx.json') as f:
                   data = json.load(f)
               if data['response']['numFound'] > 0:
@@ -72,11 +72,14 @@ jobs:
                   # Remove internal Solr fields
                   for key in ['_version_', '_root_']:
                       doc.pop(key, None)
-                  doc['vdate'] = '$TODAYT00:00:00Z'
-                  print('Updating with FULL PUSH...')
+                  doc['vdate'] = 'TODAY_TIME'
+                  # Save for FULL PUSH (replace TODAY_TIME)
                   with open('/tmp/job_olx_full.json', 'w') as out:
                       json.dump([doc], out)
-              "
+              EOF
+              
+              # Replace TODAY_TIME with actual datetime
+              sed -i "s/TODAY_TIME/${TODAY}T00:00:00Z/g" /tmp/job_olx_full.json
               
               curl -g -u "$SOLR_AUTH" -X POST -H "Content-Type: application/json" \
                 "https://solr.peviitor.ro/solr/job/update?commit=true" \
