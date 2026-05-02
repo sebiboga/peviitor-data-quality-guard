@@ -50,9 +50,11 @@ jobs:
 
           echo ""
           echo "=== PASUL 1 COMPLET ==="
-          
-          # PAUZĂ 2 minute înainte de următorul pas
-          echo "PAUZĂ 2 minute..."
+      
+      # ==================== PAUZĂ 2 minute (prin job separation) ====================
+      - name: PAUZĂ 2 minute
+        run: |
+          echo "PAUZĂ 2 minute înainte de PASUL 2.1..."
           sleep 120
       
       # ==================== PASUL 2.1: TEST_URL.MD (VALIDARE URL) ====================
