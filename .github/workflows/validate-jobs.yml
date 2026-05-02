@@ -144,6 +144,87 @@ jobs:
           echo ""
           echo "=== PASUL 2.1 COMPLET ==="
 
+      # ==================== PAUZĂ 2 minute ====================
+      - name: PAUZĂ 2 minute
+        run: |
+          echo "PAUZĂ 2 minute înainte de PASUL 2.2..."
+          sleep 120
+
+      # ==================== PASUL 2.2: TEST_LOCATION_ROMANIA.MD ====================
+      - name: PASUL 2.2 - test_location_romania.md
+        id: pasul22
+        if: steps.pasul21.outcome == 'success'
+        run: |
+          echo "=== PASUL 2.2: TEST_LOCATION_ROMANIA.MD ==="
+          JOB_URL=$(cat /tmp/job_url.txt)
+          echo "URL de verificat: $JOB_URL"
+          echo ""
+
+          # Citește location din jobul salvat
+          python3 -c "
+          import json
+          with open('/tmp/job_data.json') as f:
+              doc = json.load(f)
+          loc = doc.get('location', [])
+          print('LOCATION din Solr:', loc)
+          
+          # Orașe în România (listă parțială)
+          romanian_cities = ['bucuresti', 'cluj-napoca', 'timisoara', 'iasi', 'constanta', 'brasov', 
+                            'sibiu', 'oradea', 'arad', 'craiova', 'galati', 'braila', 'targu-mures',
+                            'alba-iulia', 'pitesti', 'ploiesti', 'buzau', 'vaslui', 'focsani',
+                            'satu-mare', 'baia-mare', 'bistrita', 'sfantu-gheorghe', 'miercurea-ciuc',
+                            'tulcea', 'calarasi', 'giurgiu', 'turnu-magurele', 'roșiorii-de-vede',
+                            'alexandria', 'medgidia', 'mangalia', 'călărași', 'ilfov']
+          
+          found_romanian = False
+          for city in loc:
+              if isinstance(city, str) and any(rc in city.lower() for rc in romanian_cities):
+                  found_romanian = True
+                  break
+          
+          if found_romanian:
+              print('REZULTAT: VALID (are locație în România)')
+              print('DECIZIE: Continuă validarea')
+              with open('/tmp/location_status.txt', 'w') as f:
+                  f.write('VALID')
+          else:
+              print('REZULTAT: NO ROMANIAN LOCATION')
+              print('DECIZIE: DELETE din Solr (jobul nu e pentru România)')
+              with open('/tmp/location_status.txt', 'w') as f:
+                  f.write('DELETE')
+          "
+
+          LOCATION_STATUS=$(cat /tmp/location_status.txt)
+          echo ""
+          echo "STATUS FINAL: $LOCATION_STATUS"
+
+          if [ "$LOCATION_STATUS" = "DELETE" ]; then
+              echo ""
+              echo "=== ȘTERG JOB DIN SOLR (fără locație în România) ==="
+              curl -g -u "$SOLR_AUTH" -X POST -H "Content-Type: application/json" \
+                "https://solr.peviitor.ro/solr/job/update?commit=true" \
+                -d "{\"delete\": [\"$JOB_URL\"]}"
+
+              echo ""
+              echo "=== VERIFICĂ ȘTERGEREA ==="
+              RESP=$(curl -g -s -u "$SOLR_AUTH" \
+                "https://solr.peviitor.ro/solr/job/select?q=url:$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")&wt=json&rows=1")
+              if echo "$RESP" | grep -q '"numFound":0'; then
+                echo "VERIFICARE: Job șters cu succes din Solr"
+              else
+                echo "EROARE: Job încă în Solr!"
+              fi
+          fi
+
+          echo ""
+          echo "=== PASUL 2.2 COMPLET ==="
+
+      # ==================== PAUZĂ 2 minute ====================
+      - name: PAUZĂ 2 minute
+        run: |
+          echo "PAUZĂ 2 minute înainte de PASUL 2.3..."
+          sleep 120
+
       # ==================== AFIȘEAZĂ REZULTATUL FINAL ====================
       - name: Rezultat final
         if: always()
