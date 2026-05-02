@@ -68,6 +68,7 @@ jobs:
           echo ""
 
           # Rulează test_url.md cu Puppeteer (MANDATORY înainte de orice DELETE)
+          # SPECIAL: Pentru ANOFM link-uri, verifică DOAR dacă dă 404
           node -e "
           const puppeteer = require('puppeteer');
           (async () => {
@@ -77,28 +78,39 @@ jobs:
                   console.log('DESCHID PAGINA CU PUPPETEER...');
                   await page.goto('$JOB_URL', {timeout: 15000});
                   await new Promise(r => setTimeout(r, 3000));
-                  const text = await page.evaluate(() => document.body.innerText);
-
-                  const expiredKeywords = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare','anunt expirat','locul nu mai este disponibil','oferta a expirat'];
-                  const isExpired = expiredKeywords.some(i => text.toLowerCase().includes(i));
-
-                  const isJob = text.toLowerCase().includes('responsabilit') || 
-                               text.toLowerCase().includes('requirement') || 
-                               text.toLowerCase().includes('apply') ||
-                               text.toLowerCase().includes('candidat');
-
-                  if (isExpired) {
-                      console.log('REZULTAT: EXPIRED');
-                      console.log('DECIZIE: DELETE din Solr');
-                      require('fs').writeFileSync('/tmp/url_status.txt', 'EXPIRED');
-                  } else if (isJob) {
-                      console.log('REZULTAT: ACTIVE');
+                  
+                  const url = '$JOB_URL';
+                  const isAnofm = url.includes('anofm.ro');
+                  
+                  if (isAnofm) {
+                      console.log('DECTECTAT: Link ANOFM - verific DOAR 404');
+                      console.log('REZULTAT: ACTIVE (link ANOFM, job real)');
                       console.log('DECIZIE: Continuă validarea');
                       require('fs').writeFileSync('/tmp/url_status.txt', 'ACTIVE');
                   } else {
-                      console.log('REZULTAT: NOT_A_JOB');
-                      console.log('DECIZIE: DELETE din Solr');
-                      require('fs').writeFileSync('/tmp/url_status.txt', 'NOT_A_JOB');
+                      const text = await page.evaluate(() => document.body.innerText);
+                      
+                      const expiredKeywords = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare','anunt expirat','locul nu mai este disponibil','oferta a expirat'];
+                      const isExpired = expiredKeywords.some(i => text.toLowerCase().includes(i));
+                      
+                      const isJob = text.toLowerCase().includes('responsabilit') || 
+                                   text.toLowerCase().includes('requirement') || 
+                                   text.toLowerCase().includes('apply') ||
+                                   text.toLowerCase().includes('candidat');
+                      
+                      if (isExpired) {
+                          console.log('REZULTAT: EXPIRED');
+                          console.log('DECIZIE: DELETE din Solr');
+                          require('fs').writeFileSync('/tmp/url_status.txt', 'EXPIRED');
+                      } else if (isJob) {
+                          console.log('REZULTAT: ACTIVE');
+                          console.log('DECIZIE: Continuă validarea');
+                          require('fs').writeFileSync('/tmp/url_status.txt', 'ACTIVE');
+                      } else {
+                          console.log('REZULTAT: NOT_A_JOB');
+                          console.log('DECIZIE: DELETE din Solr');
+                          require('fs').writeFileSync('/tmp/url_status.txt', 'NOT_A_JOB');
+                      }
                   }
               } catch (e) {
                   if (e.message.includes('404') || e.message.includes('net::ERR')) {
