@@ -54,7 +54,10 @@ jobs:
           URL_STATUS=$(cat /tmp/url_status.txt)
           echo "STATUS: $URL_STATUS"
           
-          if [ "$URL_STATUS" = "EXPIRED" ] || [ "$URL_STATUS" = "NOT_A_JOB" ]; then
+          # For SKIP (OLX/Publi24): continue validation without delete
+          if [ "$URL_STATUS" = "SKIP" ]; then
+              echo "SKIPPED (OLX/Publi24) - continue validation"
+          elif [ "$URL_STATUS" = "EXPIRED" ] || [ "$URL_STATUS" = "NOT_A_JOB" ]; then
               echo "=== DELETE JOB ==="
               curl -g -u "$SOLR_AUTH" -X POST -H "Content-Type: application/json" \
                 "https://solr.peviitor.ro/solr/job/update?commit=true" \
