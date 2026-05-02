@@ -39,44 +39,16 @@ jobs:
           echo "Data de azi: $TODAY"
           echo ""
 
-          # Scrie scriptul Python temporar
-          cat > /tmp/extract_job.py << 'PYEOF'
-          import sys, json, os
-
-          data = json.load(sys.stdin)
-          if data['response']['numFound'] == 0:
-              print('NU MAI SUNT JOBURI ÎN SOLR')
-              sys.exit(1)
-
-          doc = data['response']['docs'][0]
-          vdate = doc.get('vdate', '')
-          today = os.environ.get('TODAY', '')
-
-          print('JOB EXTRAS DIN SOLR:')
-          print(f"URL: {doc.get('url', 'N/A')}")
-          print(f"Title: {doc.get('title', 'N/A')}")
-          print(f"Company: {doc.get('company', 'N/A')}")
-          print(f"Location: {doc.get('location', 'N/A')}")
-          print(f"Date: {doc.get('date', 'N/A')}")
-          print(f"Status: {doc.get('status', 'N/A')}")
-          print(f"vdate: {vdate if vdate else 'LIPSĂ'}")
-          print()
-
-          if vdate.startswith(today):
-              print('DECIZIE: SKIP (vdate începe cu azi)')
-              print('JOB DEJA VALIDAT ASTĂZI')
-              sys.exit(2)
-          else:
-              print('DECIZIE: TAKE (job de validat)')
-              with open('/tmp/job_url.txt', 'w') as f:
-                  f.write(doc['url'])
-              with open('/tmp/job_data.json', 'w') as f:
-                  json.dump(doc, f)
-          PYEOF
-
-          # Rulează scriptul
+          # Salvează răspunsul Solr într-un fișier
           curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fl=url,title,company,vdate,location,date,status&wt=json&rows=1" \
-            -u "$SOLR_USER:$SOLR_PASSWD" | TODAY=$TODAY python3 /tmp/extract_job.py
+            -u "$SOLR_USER:$SOLR_PASSWD" -o /tmp/solr_response.json
+
+          echo "Răspunsul de la Solr:"
+          cat /tmp/solr_response.json
+          echo ""
+
+          # Rulează scriptul Python cu fișierul
+          TODAY=$TODAY python3 /tmp/extract_job.py /tmp/solr_response.json
 
           echo ""
           echo "=== PASUL 1 COMPLET ==="
@@ -154,14 +126,8 @@ jobs:
               echo ""
               echo "=== VERIFICĂ ȘTERGEREA (test_deleted_url.md) ==="
               # Folosește Python pentru a face escape la URL
-              python3 -c "
-          import urllib.parse, sys
-          url = '$JOB_URL'
-          encoded = urllib.parse.quote(url)
-          print(encoded)
-          " > /tmp/encoded_url.txt
-              ENCODED_URL=$(cat /tmp/encoded_url.txt)
-
+              ENCODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")
+              
               curl -g -u "$SOLR_USER:$SOLR_PASSWD" \
                 "https://solr.peviitor.ro/solr/job/select?q=url:$ENCODED_URL&wt=json&rows=1" | python3 -c "
           import sys, json
