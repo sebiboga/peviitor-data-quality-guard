@@ -129,18 +129,16 @@ jobs:
 
               echo ""
               echo "=== VERIFICĂ ȘTERGEREA (test_deleted_url.md) ==="
-              # Folosește Python pentru a face escape la URL
-    # Verifică dacă job-ul a fost șters (folosim grep să evităm probleme cu JSON)
-    echo "Verificare ștergere..."
-    RESP=$(curl -g -s -u "$SOLR_AUTH" \
-      "https://solr.peviitor.ro/solr/job/select?q=url:$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")&wt=json&rows=1")
-    
-    if echo "$RESP" | grep -q '"numFound":0'; then
-      echo "VERIFICARE: Job șters cu succes din Solr"
-    else
-      echo "EROARE: Job încă în Solr sau eroare!"
-      echo "$RESP"
-    fi
+              # Folosim grep pentru verificare simplă
+              RESP=$(curl -g -s -u "$SOLR_AUTH" \
+                "https://solr.peviitor.ro/solr/job/select?q=url:$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")&wt=json&rows=1")
+              
+              if echo "$RESP" | grep -q '"numFound":0'; then
+                echo "VERIFICARE: Job șters cu succes din Solr"
+              else
+                echo "EROARE: Job încă în Solr sau eroare!"
+                echo "$RESP"
+              fi
           fi
 
           echo ""
