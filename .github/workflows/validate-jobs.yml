@@ -54,10 +54,37 @@ jobs:
           URL_STATUS=$(cat /tmp/url_status.txt)
           echo "STATUS: $URL_STATUS"
           
-          # For SKIP (OLX/Publi24): continue validation without delete
-          if [ "$URL_STATUS" = "SKIP" ]; then
-              echo "SKIPPED (OLX/Publi24) - continue validation"
-          elif [ "$URL_STATUS" = "EXPIRED" ] || [ "$URL_STATUS" = "NOT_A_JOB" ]; then
+          # Handle OLX/Publi24 KEEP: set vdate=today with FULL PUSH, skip further validation
+          if [ "$URL_STATUS" = "OLX_KEEP" ]; then
+              echo "=== OLX/Publi24 KEEP: Set vdate=today ==="
+              TODAY=$(date +%Y-%m-%d)
+              # Get current job data and add vdate with FULL PUSH
+              curl -g -s -u "$SOLR_AUTH" \
+                "https://solr.peviitor.ro/solr/job/select?q=url:$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")&fl=*&wt=json&rows=1" \
+                -o /tmp/job_olx.json"
+              
+              python3 -c "
+              import json, sys
+              with open('/tmp/job_olx.json') as f:
+                  data = json.load(f)
+              if data['response']['numFound'] > 0:
+                  doc = data['response']['docs'][0]
+                  # Remove internal Solr fields
+                  for key in ['_version_', '_root_']:
+                      doc.pop(key, None)
+                  doc['vdate'] = '$TODAYT00:00:00Z'
+                  print('Updating with FULL PUSH...')
+                  with open('/tmp/job_olx_full.json', 'w') as out:
+                      json.dump([doc], out)
+              "
+              
+              curl -g -u "$SOLR_AUTH" -X POST -H "Content-Type: application/json" \
+                "https://solr.peviitor.ro/solr/job/update?commit=true" \
+                -d @/tmp/job_olx_full.json"
+              
+              echo "OLX/Publi24 job updated with vdate=$TODAY - SKIP further validation"
+              echo "OLX_KEEP" > /tmp/url_status.txt"
+           elif [ "$URL_STATUS" = "EXPIRED" ] || [ "$URL_STATUS" = "NOT_A_JOB" ]; then
               echo "=== DELETE JOB ==="
               curl -g -u "$SOLR_AUTH" -X POST -H "Content-Type: application/json" \
                 "https://solr.peviitor.ro/solr/job/update?commit=true" \
