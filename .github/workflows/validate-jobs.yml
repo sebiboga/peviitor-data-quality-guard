@@ -6,11 +6,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
+      SOLR_USER: ${{ secrets.SOLR_USER }}
+      SOLR_PASSWD: ${{ secrets.SOLR_PASSWD }}
       SOLR_AUTH: ${{ secrets.SOLR_AUTH }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,77 +28,152 @@ jobs:
           node-version: '20'
 
       - name: Install Puppeteer
-        run: npm install -g puppeteer@latest
+        run: npm install puppeteer
 
-      - name: Create validation script
+      # ==================== PASUL 1: EXTRAGE UN JOB DIN SOLR ====================
+      - name: PASUL 1 - Extrage job din Solr
+        id: pasul1
         run: |
-          echo "const puppeteer = require('puppeteer');" > validate_url.js
-          echo "" >> validate_url.js
-          echo "async function validateUrl(url) {" >> validate_url.js
-          echo "  const browser = await puppeteer.launch({" >> validate_url.js
-          echo "    headless: true," >> validate_url.js
-          echo "    args: ['--no-sandbox', '--disable-setuid-sandbox']" >> validate_url.js
-          echo "  });" >> validate_url.js
-          echo "  const page = await browser.newPage();" >> validate_url.js
-          echo "  try {" >> validate_url.js
-          echo "    await page.goto(url, {timeout: 15000});" >> validate_url.js
-          echo "    await new Promise(r => setTimeout(r, 3000));" >> validate_url.js
-          echo "    const text = await page.evaluate(() => document.body.innerText);" >> validate_url.js
-          echo "    const expired = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare']" >> validate_url.js
-          echo "      .some(i => text.toLowerCase().includes(i));" >> validate_url.js
-          echo "    await browser.close();" >> validate_url.js
-          echo "    return expired ? 'EXPIRED' : 'ACTIVE';" >> validate_url.js
-          echo "  } catch(e) {" >> validate_url.js
-          echo "    await browser.close();" >> validate_url.js
-          echo "    return 'ERROR: ' + e.message;" >> validate_url.js
-          echo "  }" >> validate_url.js
-          echo "}" >> validate_url.js
-          echo "" >> validate_url.js
-          echo "async function main() {" >> validate_url.js
-          echo "  const url = process.argv[2];" >> validate_url.js
-          echo "  if (!url) {" >> validate_url.js
-          echo "    console.log('Usage: node validate_url.js <URL>');" >> validate_url.js
-          echo "    process.exit(1);" >> validate_url.js
-          echo "  }" >> validate_url.js
-          echo "  const result = await validateUrl(url);" >> validate_url.js
-          echo "  console.log(result);" >> validate_url.js
-          echo "}" >> validate_url.js
-          echo "" >> validate_url.js
-          echo "main();" >> validate_url.js
-          cat validate_url.js
-
-      - name: Get 1 job
-        run: |
-          curl -g "https://solr.peviitor.ro/solr/job/select?q=*:*&sort=vdate+asc&fl=*&wt=json&rows=1" \
-            -u "$SOLR_AUTH" -o /tmp/jobs.json
-          cat /tmp/jobs.json
-
-      - name: Create prompt for OpenCode
-        run: |
+          echo "=== PASUL 1: EXTRAGE UN JOB DIN SOLR ==="
           TODAY=$(date +%Y-%m-%d)
-          echo "HEY OPENCODE!" > /tmp/prompt.txt
-          echo "" >> /tmp/prompt.txt
-          echo "Today: $TODAY" >> /tmp/prompt.txt
-          echo "" >> /tmp/prompt.txt
-          echo "Jobs: /tmp/jobs.json" >> /tmp/prompt.txt
-          echo "" >> /tmp/prompt.txt
-          echo "YOUR TASK:" >> /tmp/prompt.txt
-          echo "For EACH job:" >> /tmp/prompt.txt
-          echo "1. Read vdate" >> /tmp/prompt.txt
-          echo "2. IF vdate starts with '$TODAY' → SKIP (don't test)" >> /tmp/prompt.txt
-          echo "3. ELSE → TEST using tests/*.md" >> /tmp/prompt.txt
-          echo "" >> /tmp/prompt.txt
-          echo "KEEP IT SIMPLE:" >> /tmp/prompt.txt
-          echo "- Skip if vdate=$TODAY" >> /tmp/prompt.txt
-          echo "- Test if vdate≠$TODAY" >> /tmp/prompt.txt
-          echo "- Process ONE BY ONE" >> /tmp/prompt.txt
-          cat /tmp/prompt.txt
+          echo "Data de azi: $TODAY"
+          echo ""
 
-      - name: Upload
-        uses: actions/upload-artifact@v4
-        with:
-          name: batch
-          path: |
-            /tmp/jobs.json
-            /tmp/prompt.txt
-          retention-days: 7
+          # Extrage primul job din Solr (fără sortare, primul disponibil)
+          curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fl=url,title,company,vdate,location,date,status&wt=json&rows=1" \
+            -u "$SOLR_USER:$SOLR_PASSWD" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          if data['response']['numFound'] == 0:
+              print('NU MAI SUNT JOBURI ÎN SOLR')
+              exit(1)
+          doc = data['response']['docs'][0]
+          vdate = doc.get('vdate', '')
+          today = '$TODAY'
+
+          print('JOB EXTRAS DIN SOLR:')
+          print(f\"URL: {doc['url']}\")
+          print(f\"Title: {doc.get('title', 'N/A')}\")
+          print(f\"Company: {doc.get('company', 'N/A')}\")
+          print(f\"Location: {doc.get('location', 'N/A')}\")
+          print(f\"Date: {doc.get('date', 'N/A')}\")
+          print(f\"Status: {doc.get('status', 'N/A')}\")
+          print(f\"vdate: {vdate if vdate else 'LIPSĂ'}\")
+          print()
+
+          if vdate.startswith(today):
+              print('DECIZIE: SKIP (vdate începe cu azi)')
+              print('JOB DEJA VALIDAT ASTĂZI')
+              exit(2)
+          else:
+              print('DECIZIE: TAKE (job de validat)')
+              # Salvează URL-ul pentru pașii următori
+              with open('/tmp/job_url.txt', 'w') as f:
+                  f.write(doc['url'])
+              with open('/tmp/job_data.json', 'w') as f:
+                  json.dump(doc, f)
+          "
+
+          echo ""
+          echo "=== PASUL 1 COMPLET ==="
+
+      # ==================== PASUL 2.1: TEST_URL.MD (VALIDARE URL) ====================
+      - name: PASUL 2.1 - test_url.md (ACTIVE/EXPIRED)
+        id: pasul21
+        if: steps.pasul1.outcome == 'success'
+        run: |
+          echo "=== PASUL 2.1: TEST_URL.MD (VALIDARE URL) ==="
+          JOB_URL=$(cat /tmp/job_url.txt)
+          echo "URL de testat: $JOB_URL"
+          echo ""
+
+          # Rulează test_url.md cu Puppeteer (MANDATORY înainte de orice DELETE)
+          node -e "
+          const puppeteer = require('puppeteer');
+          (async () => {
+              const browser = await puppeteer.launch({headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox']});
+              const page = await browser.newPage();
+              try {
+                  console.log('DESCHID PAGINA CU PUPPETEER...');
+                  await page.goto('$JOB_URL', {timeout: 15000});
+                  await new Promise(r => setTimeout(r, 3000));
+                  const text = await page.evaluate(() => document.body.innerText);
+                  
+                  const expiredKeywords = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare','anunt expirat','locul nu mai este disponibil','oferta a expirat'];
+                  const isExpired = expiredKeywords.some(i => text.toLowerCase().includes(i));
+                  
+                  const isJob = text.toLowerCase().includes('responsabilit') || 
+                               text.toLowerCase().includes('requirement') || 
+                               text.toLowerCase().includes('apply') ||
+                               text.toLowerCase().includes('candidat');
+                  
+                  if (isExpired) {
+                      console.log('REZULTAT: EXPIRED');
+                      console.log('DECIZIE: DELETE din Solr');
+                      require('fs').writeFileSync('/tmp/url_status.txt', 'EXPIRED');
+                  } else if (isJob) {
+                      console.log('REZULTAT: ACTIVE');
+                      console.log('DECIZIE: Continuă validarea');
+                      require('fs').writeFileSync('/tmp/url_status.txt', 'ACTIVE');
+                  } else {
+                      console.log('REZULTAT: NOT_A_JOB');
+                      console.log('DECIZIE: DELETE din Solr');
+                      require('fs').writeFileSync('/tmp/url_status.txt', 'NOT_A_JOB');
+                  }
+              } catch (e) {
+                  if (e.message.includes('404') || e.message.includes('net::ERR')) {
+                      console.log('REZULTAT: EXPIRED (404/Network Error)');
+                      console.log('DECIZIE: DELETE din Solr');
+                      require('fs').writeFileSync('/tmp/url_status.txt', 'EXPIRED');
+                  } else {
+                      console.log('EROARE:', e.message);
+                      require('fs').writeFileSync('/tmp/url_status.txt', 'ERROR');
+                  }
+              } finally {
+                  await browser.close();
+              }
+          })();
+          "
+
+          URL_STATUS=$(cat /tmp/url_status.txt)
+          echo ""
+          echo "STATUS FINAL: $URL_STATUS"
+
+          # Dacă e EXPIRED sau NOT_A_JOB → DELETE din Solr
+          if [ "$URL_STATUS" = "EXPIRED" ] || [ "$URL_STATUS" = "NOT_A_JOB" ]; then
+              echo ""
+              echo "=== ȘTERG JOB DIN SOLR ==="
+              curl -g -u "$SOLR_USER:$SOLR_PASSWD" -X POST -H "Content-Type: application/json" \
+                "https://solr.peviitor.ro/solr/job/update?commit=true" \
+                -d "{\"delete\": [\"$JOB_URL\"]}"
+              
+              echo ""
+              echo "=== VERIFICĂ ȘTERGEREA (test_deleted_url.md) ==="
+              curl -g -u "$SOLR_USER:$SOLR_PASSWD" \
+                "https://solr.peviitor.ro/solr/job/select?q=url:$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")&wt=json&rows=1" | python3 -c "
+              import sys, json
+              data = json.load(sys.stdin)
+              if data['response']['numFound'] == 0:
+                  print('VERIFICARE: Job șters cu succes din Solr')
+              else:
+                  print('EROARE: Job încă în Solr!')
+              "
+          fi
+
+          echo ""
+          echo "=== PASUL 2.1 COMPLET ==="
+
+      # ==================== AFIȘEAZĂ REZULTATUL FINAL ====================
+      - name: Rezultat final
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "REZULTAT FINAL PENTRU ACEST RUN:"
+          echo "=========================================="
+          echo "PASUL 1: Job extras din Solr"
+          echo "PASUL 2.1: test_url.md → $(cat /tmp/url_status.txt 2>/dev/null || echo 'NU S-A RULAT')"
+          echo ""
+          if [ -f /tmp/job_url.txt ]; then
+            echo "Job procesat: $(cat /tmp/job_url.txt)"
+          fi
+          echo "=========================================="
