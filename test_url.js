@@ -1,22 +1,27 @@
 const puppeteer = require('puppeteer');
+const fs = require('fs');
 
 (async () => {
+    // Read URL from file
+    const JOB_URL = fs.readFileSync('/tmp/job_url.txt', 'utf8').trim();
+    
     const browser = await puppeteer.launch({headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox']});
     const page = await browser.newPage();
     try {
-        const url = process.env.JOB_URL || '';
         console.log('OPENING PAGE WITH PUPPETEER...');
-        await page.goto(url, {timeout: 15000});
+        console.log('URL:', JOB_URL);
+        
+        await page.goto(JOB_URL, {timeout: 15000});
         await new Promise(r => setTimeout(r, 3000));
         
-        console.log('URL:', url);
+        const url = JOB_URL || '';
         const isAnofm = url.includes('anofm.ro');
         
         if (isAnofm) {
             console.log('DETECTED: ANOFM link - check ONLY 404');
             console.log('RESULT: ACTIVE (ANOFM job)');
             console.log('DECISION: Continue validation');
-            require('fs').writeFileSync('/tmp/url_status.txt', 'ACTIVE');
+            fs.writeFileSync('/tmp/url_status.txt', 'ACTIVE');
         } else {
             const text = await page.evaluate(() => document.body.innerText);
             
@@ -31,25 +36,25 @@ const puppeteer = require('puppeteer');
             if (isExpired) {
                 console.log('RESULT: EXPIRED');
                 console.log('DECISION: DELETE from Solr');
-                require('fs').writeFileSync('/tmp/url_status.txt', 'EXPIRED');
+                fs.writeFileSync('/tmp/url_status.txt', 'EXPIRED');
             } else if (isJob) {
                 console.log('RESULT: ACTIVE');
                 console.log('DECISION: Continue validation');
-                require('fs').writeFileSync('/tmp/url_status.txt', 'ACTIVE');
+                fs.writeFileSync('/tmp/url_status.txt', 'ACTIVE');
             } else {
                 console.log('RESULT: NOT_A_JOB');
                 console.log('DECISION: DELETE from Solr');
-                require('fs').writeFileSync('/tmp/url_status.txt', 'NOT_A_JOB');
+                fs.writeFileSync('/tmp/url_status.txt', 'NOT_A_JOB');
             }
         }
     } catch (e) {
         if (e.message.includes('404') || e.message.includes('net::ERR')) {
             console.log('RESULT: EXPIRED (404/Network Error)');
             console.log('DECISION: DELETE from Solr');
-            require('fs').writeFileSync('/tmp/url_status.txt', 'EXPIRED');
+            fs.writeFileSync('/tmp/url_status.txt', 'EXPIRED');
         } else {
             console.log('ERROR:', e.message);
-            require('fs').writeFileSync('/tmp/url_status.txt', 'ERROR');
+            fs.writeFileSync('/tmp/url_status.txt', 'ERROR');
         }
     } finally {
         await browser.close();
