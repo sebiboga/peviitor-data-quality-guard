@@ -45,8 +45,8 @@ jobs:
           cat /tmp/solr_response.json
           echo ""
 
-          # Rulează scriptul Python cu fișierul
-          TODAY=$TODAY python3 /tmp/extract_job.py /tmp/solr_response.json
+          # Rulează scriptul Python din repo
+          TODAY=$TODAY python3 extract_job.py /tmp/solr_response.json
 
           echo ""
           echo "=== PASUL 1 COMPLET ==="
