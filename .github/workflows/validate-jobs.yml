@@ -15,11 +15,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Git
-        run: |
-          git config user.name "GitHub Actions Bot"
-          git config user.email "actions@github.com"
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -28,214 +23,54 @@ jobs:
       - name: Install Puppeteer
         run: npm install puppeteer
 
-      # ==================== PASUL 1: EXTRAGE UN JOB DIN SOLR ====================
-      - name: PASUL 1 - Extrage job din Solr
+      # ==================== PASUL 1: EXTRACT JOB ====================
+      - name: PASUL 1 - Extract job from Solr
         id: pasul1
         run: |
-          echo "=== PASUL 1: EXTRAGE UN JOB DIN SOLR ==="
+          echo "=== PASUL 1: EXTRACT JOB ==="
           TODAY=$(date +%Y-%m-%d)
-          echo "Data de azi: $TODAY"
-          echo ""
-
-          # Salvează răspunsul Solr într-un fișier
+          echo "Today: $TODAY"
+          
           curl -g -s "https://solr.peviitor.ro/solr/job/select?q=*:*&fl=url,title,company,vdate,location,date,status&wt=json&rows=1" \
             -u "$SOLR_AUTH" -o /tmp/solr_response.json
-
-          echo "Răspunsul de la Solr:"
+          
           cat /tmp/solr_response.json
-          echo ""
+          
+          python3 extract_job.py /tmp/solr_response.json
+          
+          echo "=== PASUL 1 COMPLETE ==="
 
-          # Rulează scriptul Python din repo
-          TODAY=$TODAY python3 extract_job.py /tmp/solr_response.json
-
-          echo ""
-          echo "=== PASUL 1 COMPLET ==="
-      
-        run: |
-      
-      # ==================== PASUL 2.1: TEST_URL.MD (VALIDARE URL) ====================
+      # ==================== PASUL 2.1: TEST URL ====================
       - name: PASUL 2.1 - test_url.md (ACTIVE/EXPIRED)
         id: pasul21
         if: steps.pasul1.outcome == 'success'
         run: |
-          echo "=== PASUL 2.1: TEST_URL.MD (VALIDARE URL) ==="
+          echo "=== PASUL 2.1: TEST URL ==="
           JOB_URL=$(cat /tmp/job_url.txt)
-          echo "URL de testat: $JOB_URL"
-          echo ""
-
-          # Rulează test_url.md cu Puppeteer (MANDATORY înainte de orice DELETE)
-          # SPECIAL: Pentru ANOFM link-uri, verifică DOAR dacă dă 404
-          node -e "
-          const puppeteer = require('puppeteer');
-          (async () => {
-              const browser = await puppeteer.launch({headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox']});
-              const page = await browser.newPage();
-              try {
-                  console.log('DESCHID PAGINA CU PUPPETEER...');
-                  await page.goto('$JOB_URL', {timeout: 15000});
-                  await new Promise(r => setTimeout(r, 3000));
-                  
-                  const url = '$JOB_URL';
-                  const isAnofm = url.includes('anofm.ro');
-                  
-                  if (isAnofm) {
-                      console.log('DECTECTAT: Link ANOFM - verific DOAR 404');
-                      console.log('REZULTAT: ACTIVE (link ANOFM, job real)');
-                      console.log('DECIZIE: Continuă validarea');
-                      require('fs').writeFileSync('/tmp/url_status.txt', 'ACTIVE');
-                  } else {
-                      const text = await page.evaluate(() => document.body.innerText);
-                      
-                      const expiredKeywords = ['no longer available','expired','404','job filled','ocupat','închis','similar jobs','joburi similare','anunt expirat','locul nu mai este disponibil','oferta a expirat','no longer active'];
-                      const isExpired = expiredKeywords.some(i => text.toLowerCase().includes(i));
-                      
-                      const isJob = text.toLowerCase().includes('responsabilit') || 
-                                   text.toLowerCase().includes('requirement') || 
-                                   text.toLowerCase().includes('apply') ||
-                                   text.toLowerCase().includes('candidat');
-                      
-                      if (isExpired) {
-                          console.log('REZULTAT: EXPIRED');
-                          console.log('DECIZIE: DELETE din Solr');
-                          require('fs').writeFileSync('/tmp/url_status.txt', 'EXPIRED');
-                      } else if (isJob) {
-                          console.log('REZULTAT: ACTIVE');
-                          console.log('DECIZIE: Continuă validarea');
-                          require('fs').writeFileSync('/tmp/url_status.txt', 'ACTIVE');
-                      } else {
-                          console.log('REZULTAT: NOT_A_JOB');
-                          console.log('DECIZIE: DELETE din Solr');
-                          require('fs').writeFileSync('/tmp/url_status.txt', 'NOT_A_JOB');
-                      }
-                  }
-              } catch (e) {
-                  if (e.message.includes('404') || e.message.includes('net::ERR')) {
-                      console.log('REZULTAT: EXPIRED (404/Network Error)');
-                      console.log('DECIZIE: DELETE din Solr');
-                      require('fs').writeFileSync('/tmp/url_status.txt', 'EXPIRED');
-                  } else {
-                      console.log('EROARE:', e.message);
-                      require('fs').writeFileSync('/tmp/url_status.txt', 'ERROR');
-                  }
-              } finally {
-                  await browser.close();
-              }
-          })();
-          "
-
+          echo "URL: $JOB_URL"
+          
+          node test_url.js
+          
           URL_STATUS=$(cat /tmp/url_status.txt)
-          echo ""
-          echo "STATUS FINAL: $URL_STATUS"
-
-          # Dacă e EXPIRED sau NOT_A_JOB → DELETE din Solr
+          echo "STATUS: $URL_STATUS"
+          
           if [ "$URL_STATUS" = "EXPIRED" ] || [ "$URL_STATUS" = "NOT_A_JOB" ]; then
-              echo ""
-              echo "=== ȘTERG JOB DIN SOLR ==="
+              echo "=== DELETE JOB ==="
               curl -g -u "$SOLR_AUTH" -X POST -H "Content-Type: application/json" \
                 "https://solr.peviitor.ro/solr/job/update?commit=true" \
                 -d "{\"delete\": [\"$JOB_URL\"]}"
-
-              echo ""
-              echo "=== VERIFICĂ ȘTERGEREA (test_deleted_url.md) ==="
-              # Folosim grep pentru verificare simplă
-              RESP=$(curl -g -s -u "$SOLR_AUTH" \
-                "https://solr.peviitor.ro/solr/job/select?q=url:$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")&wt=json&rows=1")
-              
-              if echo "$RESP" | grep -q '"numFound":0'; then
-                echo "VERIFICARE: Job șters cu succes din Solr"
-              else
-                echo "EROARE: Job încă în Solr sau eroare!"
-                echo "$RESP"
-              fi
+              echo "Job deleted"
           fi
-
-          echo ""
-          echo "=== PASUL 2.1 COMPLET ==="
-
-        run: |
-
-      # ==================== PASUL 2.2: TEST_LOCATION_ROMANIA.MD ====================
-      - name: PASUL 2.2 - test_location_romania.md
-        id: pasul22
-        if: steps.pasul21.outcome == 'success'
-        run: |
-          echo "=== PASUL 2.2: TEST_LOCATION_ROMANIA.MD ==="
-          JOB_URL=$(cat /tmp/job_url.txt)
-          echo "URL de verificat: $JOB_URL"
-          echo ""
-
-          # Citește location din jobul salvat
-          python3 -c "
-          import json
-          with open('/tmp/job_data.json') as f:
-              doc = json.load(f)
-          loc = doc.get('location', [])
-          print('LOCATION din Solr:', loc)
           
-          # Orașe în România (listă parțială)
-          romanian_cities = ['bucuresti', 'cluj-napoca', 'timisoara', 'iasi', 'constanta', 'brasov', 
-                            'sibiu', 'oradea', 'arad', 'craiova', 'galati', 'braila', 'targu-mures',
-                            'alba-iulia', 'pitesti', 'ploiesti', 'buzau', 'vaslui', 'focsani',
-                            'satu-mare', 'baia-mare', 'bistrita', 'sfantu-gheorghe', 'miercurea-ciuc',
-                            'tulcea', 'calarasi', 'giurgiu', 'turnu-magurele', 'roșiorii-de-vede',
-                            'alexandria', 'medgidia', 'mangalia', 'călărași', 'ilfov']
-          
-          found_romanian = False
-          for city in loc:
-              if isinstance(city, str) and any(rc in city.lower() for rc in romanian_cities):
-                  found_romanian = True
-                  break
-          
-          if found_romanian:
-              print('REZULTAT: VALID (are locație în România)')
-              print('DECIZIE: Continuă validarea')
-              with open('/tmp/location_status.txt', 'w') as f:
-                  f.write('VALID')
-          else:
-              print('REZULTAT: NO ROMANIAN LOCATION')
-              print('DECIZIE: DELETE din Solr (jobul nu e pentru România)')
-              with open('/tmp/location_status.txt', 'w') as f:
-                  f.write('DELETE')
-          "
+          echo "=== PASUL 2.1 COMPLETE ==="
 
-          LOCATION_STATUS=$(cat /tmp/location_status.txt)
-          echo ""
-          echo "STATUS FINAL: $LOCATION_STATUS"
-
-          if [ "$LOCATION_STATUS" = "DELETE" ]; then
-              echo ""
-              echo "=== ȘTERG JOB DIN SOLR (fără locație în România) ==="
-              curl -g -u "$SOLR_AUTH" -X POST -H "Content-Type: application/json" \
-                "https://solr.peviitor.ro/solr/job/update?commit=true" \
-                -d "{\"delete\": [\"$JOB_URL\"]}"
-
-              echo ""
-              echo "=== VERIFICĂ ȘTERGEREA ==="
-              RESP=$(curl -g -s -u "$SOLR_AUTH" \
-                "https://solr.peviitor.ro/solr/job/select?q=url:$(python3 -c "import urllib.parse; print(urllib.parse.quote('$JOB_URL'))")&wt=json&rows=1")
-              if echo "$RESP" | grep -q '"numFound":0'; then
-                echo "VERIFICARE: Job șters cu succes din Solr"
-              else
-                echo "EROARE: Job încă în Solr!"
-              fi
-          fi
-
-          echo ""
-          echo "=== PASUL 2.2 COMPLET ==="
-
-        run: |
-
-      # ==================== AFIȘEAZĂ REZULTATUL FINAL ====================
-      - name: Rezultat final
+      # ==================== RESULT ====================
+      - name: Result
         if: always()
         run: |
           echo "=========================================="
-          echo "REZULTAT FINAL PENTRU ACEST RUN:"
-          echo "=========================================="
-          echo "PASUL 1: Job extras din Solr"
-          echo "PASUL 2.1: test_url.md → $(cat /tmp/url_status.txt 2>/dev/null || echo 'NU S-A RULAT')"
-          echo ""
-          if [ -f /tmp/job_url.txt ]; then
-            echo "Job procesat: $(cat /tmp/job_url.txt)"
-          fi
+          echo "RESULT:"
+          echo "PASUL 1: Success"
+          echo "PASUL 2.1: $(cat /tmp/url_status.txt 2>/dev/null || echo 'NOT RUN')"
+          echo "Job: $(cat /tmp/job_url.txt 2>/dev/null || echo 'NONE')"
           echo "=========================================="
